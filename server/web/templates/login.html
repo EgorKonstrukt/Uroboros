@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Uroboros - Login</title>
+<link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body class="login-body">
+<div class="login-card">
+  <h1>Uroboros Server</h1>
+  <p class="subtitle">Enter admin password to continue</p>
+  <div class="md-field">
+    <label for="passwordInput">Password</label>
+    <input id="passwordInput" type="password" placeholder="Password" autofocus onkeydown="if(event.key==='Enter')doLogin()">
+  </div>
+  <button class="btn btn-start" onclick="doLogin()" id="loginBtn" style="width:100%;justify-content:center">Login</button>
+  <div id="loginError"></div>
+</div>
+<script>
+async function doLogin() {
+  var pw = document.getElementById('passwordInput').value;
+  var err = document.getElementById('loginError');
+  var btn = document.getElementById('loginBtn');
+  if (!pw) { err.textContent = 'Please enter a password'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Logging in...';
+  try {
+    var r = await fetch('/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
+    var d = await r.json();
+    if (d.token) { sessionStorage.setItem('admin_token', d.token); window.location.href = '/admin/'; }
+    else { err.textContent = d.error || 'Login failed'; err.style.display = 'block'; }
+  } catch (e) { err.textContent = 'Connection error'; err.style.display = 'block'; }
+  btn.disabled = false;
+  btn.textContent = 'Login';
+}
+</script>
+</body>
+</html>

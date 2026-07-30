@@ -1,0 +1,15 @@
+# Launcher dependencies
+PyQt6>=6.5
+PyQt6-Fluent-Widgets>=1.5
+requests>=2.31
+psutil>=5.9
+
+# Server dependencies
+fastapi>=0.110
+uvicorn>=0.29
+sqlalchemy>=2.0
+aiosqlite>=0.20
+pydantic>=2.0
+
+# Build
+nuitka>=2.0

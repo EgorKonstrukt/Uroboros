@@ -1,0 +1,226 @@
+/* Uroboros Launcher Theme */
+/* Light theme - applied by default, dark variant loaded at runtime */
+
+QMainWindow {
+    background-color: #f5f5f5;
+}
+
+QLabel {
+    color: #333333;
+}
+
+QLineEdit {
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 8px 12px;
+    background-color: #ffffff;
+    color: #333333;
+    font-size: 14px;
+}
+
+QLineEdit:focus {
+    border-color: #0078d4;
+}
+
+QPushButton {
+    border: none;
+    border-radius: 6px;
+    padding: 8px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #ffffff;
+    background-color: #0078d4;
+}
+
+QPushButton:hover {
+    background-color: #106ebe;
+}
+
+QPushButton:pressed {
+    background-color: #005a9e;
+}
+
+QPushButton:disabled {
+    background-color: #c8c8c8;
+    color: #888888;
+}
+
+QTextEdit, QPlainTextEdit {
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    background-color: #ffffff;
+    color: #333333;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+    padding: 8px;
+}
+
+QListWidget {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background-color: #ffffff;
+    outline: none;
+}
+
+QListWidget::item {
+    padding: 12px 16px;
+    border-radius: 6px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+QListWidget::item:hover {
+    background-color: #f0f7ff;
+}
+
+QListWidget::item:selected {
+    background-color: #deecf9;
+    color: #333333;
+}
+
+QProgressBar {
+    border: none;
+    border-radius: 4px;
+    background-color: #e0e0e0;
+    height: 8px;
+    text-align: center;
+    font-size: 11px;
+}
+
+QProgressBar::chunk {
+    background-color: #0078d4;
+    border-radius: 4px;
+}
+
+QScrollBar:vertical {
+    width: 8px;
+    background: transparent;
+}
+
+QScrollBar::handle:vertical {
+    background: #c0c0c0;
+    border-radius: 4px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #a0a0a0;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    height: 8px;
+    background: transparent;
+}
+
+QScrollBar::handle:horizontal {
+    background: #c0c0c0;
+    border-radius: 4px;
+    min-width: 30px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #a0a0a0;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+QGroupBox {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-top: 16px;
+    padding: 16px;
+    padding-top: 24px;
+    font-weight: 500;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 4px 12px;
+    color: #666666;
+}
+
+QComboBox {
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 8px 12px;
+    background-color: #ffffff;
+    color: #333333;
+    font-size: 14px;
+}
+
+QComboBox:focus {
+    border-color: #0078d4;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+}
+
+QComboBox QAbstractItemView {
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    background: #ffffff;
+    selection-background-color: #deecf9;
+    selection-color: #333333;
+    outline: none;
+}
+
+QCheckBox {
+    spacing: 8px;
+    color: #333333;
+    font-size: 14px;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #d0d0d0;
+    border-radius: 4px;
+    background-color: #ffffff;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #0078d4;
+    border-color: #0078d4;
+}
+
+QTabWidget::pane {
+    border: none;
+    background-color: transparent;
+}
+
+QTabBar::tab {
+    padding: 10px 20px;
+    border: none;
+    color: #666666;
+    font-size: 14px;
+}
+
+QTabBar::tab:selected {
+    color: #0078d4;
+    border-bottom: 2px solid #0078d4;
+}
+
+QTabBar::tab:hover {
+    color: #333333;
+}
+
+QSplitter::handle {
+    background: #e0e0e0;
+    width: 2px;
+}
