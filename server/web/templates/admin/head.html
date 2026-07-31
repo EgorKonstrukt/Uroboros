@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Uroboros Admin</title>
+<link rel="stylesheet" href="/admin/static/css/base.css?v=1">
+<link rel="stylesheet" href="/admin/static/css/layout.css?v=1">
+<link rel="stylesheet" href="/admin/static/css/components.css?v=1">
+<link rel="stylesheet" href="/admin/static/css/tables.css?v=1">
+<link rel="stylesheet" href="/admin/static/css/modals.css?v=1">
+<link rel="stylesheet" href="/admin/static/css/cards.css?v=1">
+</head>
+<body>
+<div id="toast"></div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logo">U</div>
+      <div class="brand-text">
+        <span class="brand-name">Uroboros</span>
+        <span class="brand-desc">Project Control</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-label">GENERAL</div>
+      <button class="nav-item active" data-tab="projects" onclick="switchTab('projects')">Projects</button>
+      <button class="nav-item" data-tab="players" onclick="switchTab('players')">Players</button>
+      <button class="nav-item" data-tab="config" onclick="switchTab('config')">Config</button>
+      <button class="nav-item" data-tab="java" onclick="switchTab('java')">Java</button>
+      <div class="nav-sep"></div>
+      <div class="nav-label">SERVERS</div>
+      <div id="sidebarServerList">
+        <div class="nav-item nav-placeholder">No servers</div>
+      </div>
+      <button class="nav-item nav-add-srv" onclick="showAddServer()">+ Add Server</button>
+    </nav>
+    <div class="sidebar-footer">
+      <button id="logoutBtn" onclick="logout()">Logout</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2 class="page-title" id="pageTitle">Projects</h2>
+      </div>
+      <div class="topbar-right">
+        <div id="topActions"></div>
+        <div id="serverMiniBar" style="display:none;align-items:center;gap:6px">
+          <span id="selServerName" style="font-size:13px;font-weight:600;color:#333"></span>
+          <span id="selServerBadge" class="badge badge-stopped">STOPPED</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="serverTabBar" class="server-tab-bar" style="display:none">
+      <div id="serverTabs" class="server-tabs"></div>
+      <button class="server-tab-add" onclick="showAddServer()" title="Add Server">+</button>
+    </div>
+
+    <div class="content">

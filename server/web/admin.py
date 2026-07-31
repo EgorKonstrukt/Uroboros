@@ -48,7 +48,7 @@ _INSTANCE_FIELD_META = {
     "enabled": {"label": "Enabled", "description": "Enable this server instance"},
     "server_dir": {"label": "Server Directory", "description": "Working directory for the MC server"},
     "server_filename": {"label": "Server JAR", "description": "Minecraft server JAR filename"},
-    "java_executable_path": {"label": "Java Executable", "description": "Path to java binary"},
+    "java_executable_path": {"label": "Java Executable", "description": "Java binary for this server (default: java from PATH)"},
     "max_memory": {"label": "Max Memory (MB)", "description": "Max heap size (-Xmx)"},
     "min_memory": {"label": "Min Memory (MB)", "description": "Min heap size (-Xms)"},
     "additional_flags": {"label": "JVM Flags", "description": "Extra JVM flags"},
@@ -92,14 +92,20 @@ def _get_inst_field_type(field_name: str) -> str:
 def _get_sorted_java_options() -> list:
     from server.mc.java import get_cached
     runtimes = get_cached()
-    result = [j.path for j in runtimes] + ["java"]
-    seen = set()
-    unique = []
-    for p in result:
-        if p not in seen:
-            seen.add(p)
-            unique.append(p)
-    return unique
+    options = [{"value": "java", "label": "Default (java from PATH)"}]
+    seen = {"java"}
+    for jr in runtimes:
+        if jr.path in seen:
+            continue
+        seen.add(jr.path)
+        label = "Java " + str(jr.major_version)
+        if jr.vendor and jr.vendor != "Unknown":
+            label += " \u00b7 " + jr.vendor
+        if jr.version:
+            label += " \u00b7 " + jr.version
+        label += " \u00b7 " + jr.path
+        options.append({"value": jr.path, "label": label})
+    return options
 
 
 async def _get_modpack_options() -> list:
@@ -1084,11 +1090,25 @@ async def import_progress(project_id: str, modpack_id: str, task_id: str):
 
 # ── Dashboard pages ──
 
+_ADMIN_FRAGMENTS = (
+    "head", "projects", "servers", "players", "config", "java",
+    "modals", "scripts",
+)
+
+
+def _render_admin_page() -> str:
+    parts = []
+    for name in _ADMIN_FRAGMENTS:
+        path = _template_dir / "admin" / f"{name}.html"
+        with open(path, "r", encoding="utf-8") as f:
+            parts.append(f.read())
+    return "\n".join(parts)
+
+
 @router.get("/", response_class=HTMLResponse)
 @router.get("/dashboard", response_class=HTMLResponse)
 async def admin_dashboard():
-    with open(_template_dir / "admin.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+    return HTMLResponse(_render_admin_page())
 
 
 # ── Auth endpoints ──

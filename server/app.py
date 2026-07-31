@@ -16,6 +16,9 @@ async def lifespan(app: FastAPI):
         await sync_all_whitelists()
     except Exception:
         pass
+    import threading
+    from server.mc.java import scan_java
+    threading.Thread(target=scan_java, daemon=True).start()
     yield
 
 

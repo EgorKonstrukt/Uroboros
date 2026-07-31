@@ -1,0 +1,56 @@
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 20px;min-width:72px;height:38px;border-radius:var(--radius);border:2px solid transparent;font-size:14px;font-weight:600;font-family:var(--font);letter-spacing:.5px;text-transform:uppercase;cursor:pointer;transition:all .15s;overflow:hidden;user-select:none;text-decoration:none;white-space:nowrap}
+.btn:hover{box-shadow:var(--md-elevation-2);filter:brightness(1.08)}
+.btn:active{box-shadow:var(--md-elevation-1);filter:brightness(.95)}
+.btn:disabled{opacity:.4;cursor:default;box-shadow:none;filter:none;pointer-events:none}
+.btn-start{background:var(--success);color:#fff;border-color:var(--success)}
+.btn-stop{background:var(--error);color:#fff;border-color:var(--error)}
+.btn-restart{background:var(--warning);color:#fff;border-color:var(--warning)}
+.btn-secondary{background:#757575;color:#fff;border-color:#757575}
+.btn-sm{height:32px;padding:0 14px;font-size:12px;min-width:56px;letter-spacing:.4px}
+
+.badge{display:inline-flex;align-items:center;padding:3px 12px;border-radius:12px;font-size:12px;font-weight:600;line-height:1.5;letter-spacing:.3px}
+.badge-running{background:#c8e6c9;color:#1b5e20}
+.badge-stopped{background:#ffcdd2;color:#b71c1c}
+
+.console-wrap{display:flex;flex-direction:column;height:calc(100vh - 230px);min-height:300px;background:#0d1117;border-radius:var(--radius-card);overflow:hidden;box-shadow:var(--md-elevation-2)}
+.console-toolbar{display:flex;align-items:center;gap:4px;padding:4px 8px;background:#161b22;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;flex-wrap:wrap}
+.console-toolbar .btn-text{color:#c9d1d9;background:rgba(255,255,255,.06);height:28px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;padding:0 10px;min-width:0;border-radius:4px;border:1px solid transparent;cursor:pointer;transition:all .15s;font-family:var(--font);display:inline-flex;align-items:center;gap:4px}
+.console-toolbar .btn-text:hover{background:rgba(255,255,255,.12);color:#ffffff;border-color:rgba(255,255,255,.1)}
+.console-toolbar .btn-text.active{background:#e94560;color:#fff;border-color:#e94560}
+.console-toolbar .btn-text.active:hover{background:#d63850}
+.console-toolbar .sep{width:1px;height:16px;background:rgba(255,255,255,.15);margin:0 4px;flex-shrink:0}
+.console-search{display:flex;align-items:center;gap:4px;margin-left:auto}
+.console-search input{padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e6edf3;font:12px var(--mono);width:140px;outline:none;transition:border-color .15s}
+.console-search input:focus{border-color:#e94560}
+.search-count{color:#8b949e;font-size:11px;min-width:30px;text-align:center}
+
+#console, #serverConsoleOutput{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 12px;font:13px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all;background:#0d1117;color:#e6edf3;scroll-behavior:smooth}
+#console .line, #serverConsoleOutput .line{padding:1px 0;min-height:18px}
+#console .line.info, #serverConsoleOutput .line.info{color:#e6edf3}
+#console .line.warn, #serverConsoleOutput .line.warn{color:#ffd54f}
+#console .line.error, #serverConsoleOutput .line.error{color:#f85149}
+#console .line.fatal, #serverConsoleOutput .line.fatal{color:#f85149;font-weight:700}
+#console .line.debug, #serverConsoleOutput .line.debug{color:#8b949e}
+#console .line.input, #serverConsoleOutput .line.input{color:#7ee787;font-style:italic}
+#console .line.system, #serverConsoleOutput .line.system{color:#d2a8ff;font-style:italic}
+#console .line.done, #serverConsoleOutput .line.done{color:#7ee787}
+#console .line.highlight, #serverConsoleOutput .line.highlight{background:rgba(233,69,96,.15);border-radius:2px}
+#console .line.server, #serverConsoleOutput .line.server{color:#f778ba}
+#console .line.crash, #serverConsoleOutput .line.crash{color:#f85149;font-weight:700;background:rgba(248,81,73,.1)}
+#console .timestamp, #serverConsoleOutput .timestamp{color:#484f58;margin-right:8px;font-size:11px}
+#console::-webkit-scrollbar, #serverConsoleOutput::-webkit-scrollbar{width:6px}
+#console::-webkit-scrollbar-track, #serverConsoleOutput::-webkit-scrollbar-track{background:#161b22}
+#console::-webkit-scrollbar-thumb, #serverConsoleOutput::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+#console::-webkit-scrollbar-thumb:hover, #serverConsoleOutput::-webkit-scrollbar-thumb:hover{background:#484f58}
+
+.console-bottom{display:flex;align-items:center;gap:6px;padding:6px 8px;background:#161b22;border-top:1px solid rgba(255,255,255,.08);flex-shrink:0}
+.console-bottom input{flex:1;padding:7px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e6edf3;font:13px var(--mono);outline:none;transition:border-color .15s}
+.console-bottom input:focus{border-color:#e94560}
+.console-bottom input::placeholder{color:#484f58}
+.console-bottom .btn-text{color:#ffffff;height:30px;background:#e94560;border-radius:4px;padding:0 14px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;border:1px solid #e94560;cursor:pointer;transition:all .15s;font-family:var(--font)}
+.console-bottom .btn-text:hover{background:#d63850;box-shadow:var(--md-elevation-2)}
+
+.console-status{display:flex;align-items:center;gap:16px;color:#484f58;font-size:11px;padding:4px 6px 0;flex-shrink:0;font-weight:500}
+.console-status .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+.console-status .dot-on{background:var(--success)}
+.console-status .dot-off{background:#484f58}

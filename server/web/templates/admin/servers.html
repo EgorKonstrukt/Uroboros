@@ -1,0 +1,60 @@
+      <div id="serversPanel" class="panel">
+        <div id="serverEmptyView">
+          <div style="padding:32px;text-align:center;color:#888">Select a server from the sidebar or add one</div>
+        </div>
+        <div id="serverDetailView" style="display:none">
+          <div class="row" style="margin-bottom:12px">
+            <h2 id="serverDetailTitle" style="font-size:18px;font-weight:500;margin:0">Server</h2>
+            <span id="serverDetailBadge" class="badge badge-stopped">STOPPED</span>
+            <span id="serverDetailPid" style="font-size:12px;color:#888;font-family:monospace;margin-left:4px"></span>
+            <span id="serverDetailModpack" style="font-size:12px;margin-left:8px;padding:2px 8px;background:#e8f5e9;border-radius:4px;display:none"></span>
+            <div style="margin-left:auto;display:flex;gap:6px">
+              <button class="btn btn-start btn-sm" onclick="serverAction('start')" id="detailBtnStart">Start</button>
+              <button class="btn btn-stop btn-sm" onclick="serverAction('stop')" id="detailBtnStop" disabled>Stop</button>
+              <button class="btn btn-restart btn-sm" onclick="serverAction('restart')" id="detailBtnRestart">Restart</button>
+              <button class="btn btn-secondary btn-sm" onclick="installServerModpack()" id="detailBtnInstallModpack">Install Modpack</button>
+              <button class="btn btn-secondary btn-sm" onclick="syncServerWhitelist()" id="detailBtnSyncWhitelist">Sync Whitelist</button>
+            </div>
+          </div>
+          <div class="server-sub-nav">
+            <button class="sub-nav-item active" data-subtab="console" onclick="switchServerSubTab('console')">Console</button>
+            <button class="sub-nav-item" data-subtab="settings" onclick="switchServerSubTab('settings')">Settings</button>
+            <button class="sub-nav-item" data-subtab="files" onclick="switchServerSubTab('files')">Files</button>
+          </div>
+          <div id="serverConsoleView" class="server-sub-panel active">
+            <div class="console-wrap server-console-wrap">
+              <div class="console-toolbar">
+                <button class="btn-text" id="consolePauseBtn" onclick="toggleConsolePause()">Pause</button>
+                <button class="btn-text active" id="consoleScrollBtn" onclick="toggleConsoleScroll()">Scroll</button>
+                <span class="sep"></span>
+                <button class="btn-text" onclick="consoleFontSize(-1)">A-</button>
+                <button class="btn-text" onclick="consoleFontSize(1)">A+</button>
+                <span class="sep"></span>
+                <button class="btn-text" onclick="clearServerConsole()">Clear</button>
+                <div class="console-search">
+                  <input id="consoleSearchInput" placeholder="Search..." oninput="searchServerConsole()">
+                  <span class="search-count" id="consoleSearchCount"></span>
+                </div>
+              </div>
+              <div id="serverConsoleOutput"></div>
+              <div class="console-bottom">
+                <input id="consoleCmdInput" placeholder="Type a command..." onkeydown="handleConsoleCmdKey(event)">
+                <button class="btn-text" onclick="sendServerCommand()">Send</button>
+              </div>
+            </div>
+          </div>
+          <div id="serverSettingsView" class="server-sub-panel">
+            <form id="serverSettingsForm" onsubmit="saveServerSettings(event)"></form>
+          </div>
+          <div id="serverFilesView" class="server-sub-panel">
+            <div class="file-toolbar" style="margin-top:0">
+              <span id="serverFilesDir" class="dir-display" style="margin-bottom:0;flex:1;padding:6px 12px;font-size:12px"></span>
+              <div class="upload-btn">
+                <button class="btn btn-start btn-sm">Upload File</button>
+                <input type="file" id="serverFilesUpload" onchange="uploadServerFile(this)" multiple>
+              </div>
+            </div>
+            <div id="serverFilesBrowser"></div>
+          </div>
+        </div>
+      </div>

@@ -1,0 +1,140 @@
+/* ===================== Navigation: tabs, sidebar, server selection ===================== */
+
+function switchTab(name) {
+    clearServerPolling();
+    document.getElementById('serverDetailView').style.display = 'none';
+    document.getElementById('serverMiniBar').style.display = 'none';
+    document.querySelectorAll('.sidebar-server-item').forEach(function (s) { s.classList.remove('active'); });
+    document.querySelectorAll('.server-tab').forEach(function (t) { t.classList.remove('active'); });
+    currentServerId = null;
+    document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
+    document.querySelectorAll('.nav-item').forEach(function (t) { t.classList.remove('active'); });
+    document.getElementById(name + 'Panel').classList.add('active');
+    var navItem = document.querySelector('.nav-item[data-tab="' + name + '"]');
+    if (navItem) navItem.classList.add('active');
+    var titles = { projects: 'Projects', players: 'Players', config: 'Config', java: 'Java' };
+    var titleEl = document.getElementById('pageTitle');
+    if (titleEl) titleEl.textContent = titles[name] || name;
+    var actions = document.getElementById('topActions');
+    actions.innerHTML = '';
+    if (name === 'projects') { loadProjects(); }
+    if (name === 'players') { loadPlayers(); }
+    if (name === 'config') { loadGlobalConfig(); }
+    if (name === 'java') { loadJavaRuntimes(); }
+}
+
+function clearServerPolling() {
+    if (serverPollTimer) { clearInterval(serverPollTimer); serverPollTimer = null; }
+}
+
+function selectServer(id) {
+    clearServerPolling();
+    document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
+    document.querySelectorAll('.nav-item').forEach(function (t) { t.classList.remove('active'); });
+    document.querySelectorAll('.sidebar-server-item').forEach(function (s) { s.classList.remove('active'); });
+    document.querySelectorAll('.server-tab').forEach(function (t) { t.classList.remove('active'); });
+    document.getElementById('serversPanel').classList.add('active');
+    var sidebarItem = document.querySelector('.sidebar-server-item[data-server="' + id + '"]');
+    if (sidebarItem) sidebarItem.classList.add('active');
+    var tab = document.querySelector('.server-tab[data-server="' + id + '"]');
+    if (tab) tab.classList.add('active');
+    document.getElementById('pageTitle').textContent = 'Server';
+    document.getElementById('topActions').innerHTML = '';
+    openServerDetail(id);
+}
+
+function renderServerNav() {
+    apiFetch('/admin/instances').then(function (r) {
+        if (!r) return;
+        r.json().then(function (servers) {
+            renderSidebarServers(servers);
+            renderServerTabs(servers);
+        });
+    });
+}
+
+function renderSidebarServers(servers) {
+    var list = document.getElementById('sidebarServerList');
+    list.innerHTML = '';
+    if (!servers.length) {
+        list.innerHTML = '<div class="nav-item nav-placeholder">No servers</div>';
+        return;
+    }
+    var groups = {};
+    for (var i = 0; i < servers.length; i++) {
+        var s = servers[i];
+        var pid = s.project_id || '';
+        if (!groups[pid]) {
+            groups[pid] = { name: s.project_name || (pid ? pid : 'No Project'), servers: [] };
+        }
+        groups[pid].servers.push(s);
+    }
+    var keys = Object.keys(groups).sort(function (a, b) {
+        return groups[a].name.localeCompare(groups[b].name);
+    });
+    for (var k = 0; k < keys.length; k++) {
+        var pid = keys[k];
+        var g = groups[pid];
+        var gid = pid || '_none';
+        if (expandedProjects[gid] === undefined) expandedProjects[gid] = true;
+        var group = document.createElement('div');
+        group.className = 'tree-group';
+        group.setAttribute('data-group', gid);
+        var header = document.createElement('button');
+        header.className = 'nav-item tree-group-header';
+        header.onclick = (function (id) { return function () { toggleProjectGroup(id); }; })(gid);
+        header.innerHTML = '<span class="tree-arrow">' + (expandedProjects[gid] ? '▾' : '▸') + '</span>' +
+            '<span class="tree-group-name">' + esc(g.name) + '</span>' +
+            '<span class="tree-count">' + g.servers.length + '</span>';
+        group.appendChild(header);
+        var children = document.createElement('div');
+        children.className = 'tree-group-children' + (expandedProjects[gid] ? '' : ' collapsed');
+        for (var j = 0; j < g.servers.length; j++) {
+            var s = g.servers[j];
+            var btn = document.createElement('button');
+            btn.className = 'nav-item sidebar-server-item' + (currentServerId === s.id ? ' active' : '');
+            btn.setAttribute('data-server', s.id);
+            btn.onclick = (function (id) { return function () { selectServer(id); }; })(s.id);
+            var modpackTag = s.modpack_name ? '<span class="tag tag-file" style="margin-left:6px;font-size:10px">' + esc(s.modpack_name) + '</span>' : '';
+            btn.innerHTML = '<span class="server-dot ' + (s.running ? 'dot-on' : 'dot-off') + '"></span>' + esc(s.name || s.id) + modpackTag;
+            children.appendChild(btn);
+        }
+        group.appendChild(children);
+        list.appendChild(group);
+    }
+}
+
+function toggleProjectGroup(gid) {
+    expandedProjects[gid] = !expandedProjects[gid];
+    var group = document.querySelector('.tree-group[data-group="' + gid + '"]');
+    if (!group) return;
+    var arrow = group.querySelector('.tree-arrow');
+    if (arrow) arrow.textContent = expandedProjects[gid] ? '▾' : '▸';
+    var children = group.querySelector('.tree-group-children');
+    if (children) children.classList.toggle('collapsed', !expandedProjects[gid]);
+}
+
+function renderServerTabs(servers) {
+    var bar = document.getElementById('serverTabBar');
+    var tabs = document.getElementById('serverTabs');
+    tabs.innerHTML = '';
+    if (!servers.length) {
+        bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = 'flex';
+    for (var i = 0; i < servers.length; i++) {
+        var s = servers[i];
+        var tab = document.createElement('button');
+        tab.className = 'server-tab' + (currentServerId === s.id ? ' active' : '');
+        tab.setAttribute('data-server', s.id);
+        tab.onclick = function (id) { return function () { selectServer(id); }; }(s.id);
+        tab.innerHTML = '<span class="server-dot ' + (s.running ? 'dot-on' : 'dot-off') + '"></span>' + esc(s.name || s.id);
+        tabs.appendChild(tab);
+    }
+}
+
+async function switchToServer(sid) {
+    switchTab('servers');
+    setTimeout(function() { selectServer(sid); }, 100);
+}
