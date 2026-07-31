@@ -554,6 +554,11 @@ class MainWindow(QWidget):
             self._open_login()
             if not self.config.account_name:
                 return
+        if not self.config.access_token:
+            self.status_label.setText("Session expired — please log in")
+            self._open_login()
+            if not self.config.access_token:
+                return
 
         self._cancel_requested = False
         self.status_label.setText("Preparing to launch...")
@@ -591,12 +596,20 @@ class MainWindow(QWidget):
                     java = "java"
                 session = self._refresh_session()
                 if session is None:
-                    return None
+                    return "no_session"
                 return java, version, session
             except CancelledError:
                 return None
 
         def on_done(result):
+            if result == "no_session":
+                self.progress_bar.setVisible(False)
+                self.cancel_btn.setVisible(False)
+                self.detail_label.setText("")
+                self.status_label.setText("Session expired — please log in")
+                self._refresh_card_states()
+                self._open_login()
+                return
             if result is None:
                 self.progress_bar.setVisible(False)
                 self.cancel_btn.setVisible(False)
@@ -700,13 +713,21 @@ class MainWindow(QWidget):
         menu = QMenu(self)
         account = menu.addAction(self.config.account_name)
         account.setEnabled(False)
+        skin = menu.addAction("Change skin...")
         switch = menu.addAction("Switch account...")
         logout = menu.addAction("Log out")
         chosen = menu.exec(self.account_btn.mapToGlobal(self.account_btn.rect().bottomLeft()))
-        if chosen == switch:
+        if chosen == skin:
+            self._open_skin_dialog()
+        elif chosen == switch:
             self._open_login()
         elif chosen == logout:
             self._logout()
+
+    def _open_skin_dialog(self):
+        from launcher.ui.skin_dialog import SkinDialog
+        dialog = SkinDialog(self.config, self)
+        dialog.exec()
 
     def _open_login(self):
         dialog = LoginDialog(self.config, self)

@@ -68,6 +68,11 @@ def probe(host: str, port: int, timeout: float = 3.0) -> dict:
                 motd = desc.get("text", "")
             else:
                 motd = str(desc or "")
+            sample = []
+            for entry in players.get("sample") or []:
+                name = (entry.get("name") or "").strip()
+                if name:
+                    sample.append({"name": name, "id": entry.get("id") or ""})
             return {
                 "online": True,
                 "latency_ms": latency,
@@ -75,6 +80,7 @@ def probe(host: str, port: int, timeout: float = 3.0) -> dict:
                 "players_max": int(players.get("max", 0) or 0),
                 "version": version.get("name", "") or "",
                 "description": motd,
+                "players_sample": sample,
             }
     except (OSError, EOFError, ValueError, json.JSONDecodeError):
         return {"online": False}

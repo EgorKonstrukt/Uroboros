@@ -1312,61 +1312,214 @@ async function uploadServerFile(input) {
 
 var playerActionId = null;
 var banServerOptions = [];
+var allUsers = [];
 
 async function loadPlayers() {
     document.getElementById('playersStatus').textContent = 'Loading...';
     try {
         var r = await apiFetch('/admin/users');
         if (!r) return;
-        var users = await r.json();
-        document.getElementById('playersStatus').textContent = users.length + ' players';
-        var tbody = document.getElementById('playersBody');
-        tbody.innerHTML = '';
-        for (var i = 0; i < users.length; i++) {
-            var u = users[i];
-            var tr = document.createElement('tr');
-            var bansHtml = '';
-            if (u.bans && u.bans.length) {
-                for (var j = 0; j < u.bans.length; j++) {
-                    var b = u.bans[j];
-                    var when = b.permanent ? 'Forever' : ('until ' + (b.expires_at || '').replace('T', ' ').slice(0, 16));
-                    var where = b.instance_name || b.instance_id || 'All servers';
-                    var viaNote = '';
-                    if (!b.owner && b.via && b.via.length) viaNote = ' via ' + b.via.join(', ');
-                    var unbanBtn = b.owner
-                        ? '<button class="ban-chip-x" title="Unban this" onclick="unbanPlayer(' + u.id + ',' + b.id + ')">✕</button>'
-                        : '';
-                    bansHtml += '<div class="ban-chip"><span class="ban-chip-title">' + esc(where) + ' — ' + esc(when) + '</span>' +
-                        (b.reason ? '<span class="ban-chip-reason">' + esc(b.reason) + '</span>' : '') +
-                        (viaNote ? '<span class="ban-chip-reason">' + esc(viaNote) + '</span>' : '') +
-                        unbanBtn + '</div>';
-                }
-            } else {
-                bansHtml = '<span class="status-text">—</span>';
-            }
-            var actions =
-                '<button class="btn btn-secondary btn-sm" onclick="openEditNickModal(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Nick</button>' +
-                '<button class="btn btn-secondary btn-sm" onclick="openPassModal(' + u.id + ')">Pass</button>' +
-                '<button class="btn btn-stop btn-sm" onclick="openBanModal(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Ban</button>' +
-                (u.bans && u.bans.length ? '<button class="btn btn-start btn-sm" onclick="unbanPlayer(' + u.id + ')">Unban</button>' : '') +
-                '<button class="btn btn-stop btn-sm" onclick="deletePlayer(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Del</button>';
-            tr.innerHTML = '<td>' + u.id + '</td>' +
-                '<td><strong>' + esc(u.display_name) + '</strong></td>' +
-                '<td>' + esc(u.username) + '</td>' +
-                '<td>' + esc(u.email) + '</td>' +
-                '<td>' + esc(u.last_ip || '') + '</td>' +
-                '<td>' + (u.created_at || '').slice(0, 10) + '</td>' +
-                '<td>' + bansHtml + '</td>' +
-                '<td class="players-actions">' + actions + '</td>';
-            tbody.appendChild(tr);
-        }
-        if (!users.length) {
-            document.getElementById('playersStatus').textContent = 'No players yet';
-        }
+        allUsers = await r.json();
+        document.getElementById('playersStatus').textContent = allUsers.length + ' players';
+        renderPlayers();
     } catch (e) {
         document.getElementById('playersStatus').textContent = 'Failed to load';
         toast('Failed: ' + e.message, 'error');
     }
+}
+
+function playerMatches(u, q) {
+    if (!q) return true;
+    var hay = (u.id + ' ' + (u.display_name || '') + ' ' + (u.username || '') + ' ' +
+        (u.email || '') + ' ' + (u.last_ip || '') + ' ' + (u.uuid || '')).toLowerCase();
+    return hay.indexOf(q) !== -1;
+}
+
+function renderPlayers() {
+    var q = (document.getElementById('playersSearch').value || '').trim().toLowerCase();
+    var users = allUsers.filter(function (u) { return playerMatches(u, q); });
+    document.getElementById('playersStatus').textContent = allUsers.length + ' players' +
+        (q && users.length !== allUsers.length ? ' (' + users.length + ' shown)' : '');
+    var tbody = document.getElementById('playersBody');
+    tbody.innerHTML = '';
+    for (var i = 0; i < users.length; i++) {
+        var u = users[i];
+        var tr = document.createElement('tr');
+        var bansHtml = '';
+        if (u.bans && u.bans.length) {
+            for (var j = 0; j < u.bans.length; j++) {
+                var b = u.bans[j];
+                var when = b.permanent ? 'Forever' : ('until ' + (b.expires_at || '').replace('T', ' ').slice(0, 16));
+                var where = b.instance_name || b.instance_id || 'All servers';
+                var viaNote = '';
+                if (!b.owner && b.via && b.via.length) viaNote = ' via ' + b.via.join(', ');
+                var unbanBtn = b.owner
+                    ? '<button class="ban-chip-x" title="Unban this" onclick="unbanPlayer(' + u.id + ',' + b.id + ')">✕</button>'
+                    : '';
+                bansHtml += '<div class="ban-chip"><span class="ban-chip-title">' + esc(where) + ' — ' + esc(when) + '</span>' +
+                    (b.reason ? '<span class="ban-chip-reason">' + esc(b.reason) + '</span>' : '') +
+                    (viaNote ? '<span class="ban-chip-reason">' + esc(viaNote) + '</span>' : '') +
+                    unbanBtn + '</div>';
+            }
+        } else {
+            bansHtml = '<span class="status-text">—</span>';
+        }
+        var statusHtml = '';
+        if (u.online) {
+            statusHtml = '<span class="status-online">Online</span>';
+            if (u.current_server_name || u.current_server) {
+                statusHtml += '<div class="status-sub">' + esc(u.current_server_name || u.current_server) + '</div>';
+            }
+        } else {
+            statusHtml = '<span class="status-text">Offline</span>';
+            if (u.last_seen) {
+                statusHtml += '<div class="status-sub">last: ' + esc(String(u.last_seen).replace('T', ' ').slice(0, 16)) + '</div>';
+            }
+        }
+        var ipCell = esc(u.last_ip || '—');
+        if (u.ip_history && u.ip_history.length > 1) {
+            ipCell += ' <span class="status-sub">(' + u.ip_history.length + ')</span>';
+        }
+        var actions =
+            '<button class="btn btn-secondary btn-sm" onclick="openEditNickModal(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Nick</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="openEmailModal(' + u.id + ',\'' + escAttr(u.email || '') + '\')">Email</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="openPassModal(' + u.id + ')">Pass</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="openIpsModal(' + u.id + ',\'' + escAttr(u.display_name) + '\')">IPs</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="openSkinModal(' + u.id + ',\'' + escAttr(u.display_name) + '\',' + (u.has_skin ? '1' : '0') + ')">Skin</button>' +
+            '<button class="btn btn-stop btn-sm" onclick="openBanModal(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Ban</button>' +
+            (u.bans && u.bans.length ? '<button class="btn btn-start btn-sm" onclick="unbanPlayer(' + u.id + ')">Unban</button>' : '') +
+            '<button class="btn btn-stop btn-sm" onclick="deletePlayer(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Del</button>';
+        tr.innerHTML = '<td>' + u.id + '</td>' +
+            '<td><strong>' + esc(u.display_name) + '</strong></td>' +
+            '<td>' + esc(u.username) + '</td>' +
+            '<td>' + esc(u.email || '') + '</td>' +
+            '<td>' + ipCell + '</td>' +
+            '<td>' + statusHtml + '</td>' +
+            '<td>' + (u.created_at || '').slice(0, 10) + '</td>' +
+            '<td>' + bansHtml + '</td>' +
+            '<td class="players-actions">' + actions + '</td>';
+        tbody.appendChild(tr);
+    }
+    if (!users.length) {
+        document.getElementById('playersStatus').textContent = allUsers.length ? 'No matches' : 'No players yet';
+    }
+}
+
+function openIpsModal(userId, nick) {
+    var u = null;
+    for (var i = 0; i < allUsers.length; i++) {
+        if (allUsers[i].id === userId) { u = allUsers[i]; break; }
+    }
+    if (!u) { toast('User not found', 'error'); return; }
+    document.getElementById('ipHistoryTitle').textContent = 'IP Addresses: ' + (nick || userId);
+    var tbody = document.getElementById('ipHistoryBody');
+    tbody.innerHTML = '';
+    var rows = u.ip_history || [];
+    if (u.last_ip) {
+        var found = rows.some(function (e) { return e.ip === u.last_ip; });
+        if (!found) rows = [{ ip: u.last_ip, last_seen: '' }].concat(rows);
+    }
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="2" class="status-text">No IPs recorded</td></tr>';
+    } else {
+        for (var j = 0; j < rows.length; j++) {
+            var ts = rows[j].last_seen ? String(rows[j].last_seen).replace('T', ' ').slice(0, 16) : '';
+            var cur = rows[j].ip === u.last_ip ? ' <span class="status-online" style="font-size:10px">current</span>' : '';
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td><code>' + esc(rows[j].ip) + '</code>' + cur + '</td><td>' + esc(ts) + '</td>';
+            tbody.appendChild(tr);
+        }
+    }
+    openModal('ipHistoryModal');
+}
+
+function openEmailModal(userId, currentEmail) {
+    playerActionId = userId;
+    document.getElementById('emailInput').value = currentEmail || '';
+    openModal('emailModal');
+}
+
+async function confirmEmailChange() {
+    if (!playerActionId) return;
+    var email = document.getElementById('emailInput').value.trim();
+    if (!email) { toast('Email is required', 'error'); return; }
+    try {
+        var r = await apiFetch('/admin/users/' + playerActionId + '/email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email })
+        });
+        if (!r) return;
+        var d = await r.json();
+        if (d.error) { toast(d.error, 'error'); return; }
+        toast('Email changed', 'success');
+        closeModal('emailModal');
+        loadPlayers();
+    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+var skinActionId = null;
+
+function openSkinModal(userId, nick, hasSkin) {
+    skinActionId = userId;
+    document.getElementById('skinModalTitle').textContent = 'Change Skin: ' + (nick || userId);
+    document.getElementById('skinFileInput').value = '';
+    document.getElementById('skinModelSelect').value = 'classic';
+    document.getElementById('skinRemoveBtn').style.display = hasSkin ? 'inline-block' : 'none';
+    var img = document.getElementById('skinPreview');
+    var u = null;
+    for (var i = 0; i < allUsers.length; i++) {
+        if (allUsers[i].id === userId) { u = allUsers[i]; break; }
+    }
+    if (u && u.has_skin) {
+        img.src = '/auth/skin/' + u.uuid;
+        img.style.visibility = 'visible';
+        document.getElementById('skinModelSelect').value = u.skin_model || 'classic';
+    } else {
+        img.removeAttribute('src');
+        img.style.visibility = 'hidden';
+    }
+    openModal('skinModal');
+}
+
+async function confirmUploadSkin() {
+    if (!skinActionId) return;
+    var input = document.getElementById('skinFileInput');
+    if (!input.files || !input.files.length) {
+        toast('Select a skin file first', 'error');
+        return;
+    }
+    var file = input.files[0];
+    if (file.size > 10 * 1024 * 1024) { toast('Skin file too large (max 10 MB)', 'error'); return; }
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('model', document.getElementById('skinModelSelect').value);
+    try {
+        var r = await apiFetch('/admin/users/' + skinActionId + '/skin', {
+            method: 'POST',
+            body: formData
+        });
+        if (!r) return;
+        var d = await r.json();
+        if (d.error) { toast(d.error, 'error'); return; }
+        toast('Skin uploaded', 'success');
+        closeModal('skinModal');
+        loadPlayers();
+    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function confirmRemoveSkin() {
+    if (!skinActionId) return;
+    if (!confirm('Remove this player\'s skin?')) return;
+    try {
+        var r = await apiFetch('/admin/users/' + skinActionId + '/skin', { method: 'DELETE' });
+        if (!r) return;
+        var d = await r.json();
+        if (d.error) { toast(d.error, 'error'); return; }
+        toast('Skin removed', 'success');
+        closeModal('skinModal');
+        loadPlayers();
+    } catch (e) { toast('Failed: ' + e.message, 'error'); }
 }
 
 function openEditNickModal(userId, currentNick) {

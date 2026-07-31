@@ -1,10 +1,12 @@
 import base64
+import json
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request, File, Form, UploadFile
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,6 +108,38 @@ def _properties_to_list(properties: dict) -> list:
     return out
 
 
+def _textures_value(user: UserModel, base_url: str) -> Optional[str]:
+    if not user.skin:
+        return None
+    payload = {
+        "timestamp": int(time.time() * 1000),
+        "profileId": user.uuid,
+        "profileName": user.display_name,
+        "textures": {
+            "SKIN": {
+                "url": f"{base_url}/auth/skin/{user.uuid}",
+                "metadata": {"model": user.skin_model or "classic"},
+            }
+        },
+    }
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _user_properties(user: UserModel, base_url: str) -> list:
+    props = _properties_to_list(user.properties)
+    tex = _textures_value(user, base_url)
+    if tex:
+        props.append({
+            "name": "textures",
+            "value": base64.b64encode(tex.encode("utf-8")).decode("ascii"),
+        })
+    return props
+
+
+def _base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
 def _issue_token(user: UserModel, client_token: str) -> str:
     token = new_token()
     user.access_token_hash = hash_token(token)
@@ -118,7 +152,7 @@ def _user_to_profile(user: UserModel) -> dict:
     return {"id": user.uuid, "name": user.display_name}
 
 
-def _user_to_auth_response(user: UserModel, access_token: str, client_token: str, request_user: bool) -> dict:
+def _user_to_auth_response(user: UserModel, access_token: str, client_token: str, request_user: bool, base_url: str) -> dict:
     profiles = [_user_to_profile(user)]
     resp = {
         "accessToken": access_token,
@@ -129,7 +163,7 @@ def _user_to_auth_response(user: UserModel, access_token: str, client_token: str
     if request_user:
         resp["user"] = {
             "id": user.uuid,
-            "properties": _properties_to_list(user.properties),
+            "properties": _user_properties(user, base_url),
         }
     return resp
 
@@ -154,7 +188,7 @@ async def authenticate(request: Request, body: AuthRequest):
         client_token = body.clientToken or new_token()
         access_token = _issue_token(user, client_token)
         await session.commit()
-        return _user_to_auth_response(user, access_token, client_token, body.requestUser)
+        return _user_to_auth_response(user, access_token, client_token, body.requestUser, _base_url(request))
 
 
 @router.post("/register")
@@ -212,7 +246,7 @@ async def register(request: Request, body: RegisterRequest):
         except Exception:
             pass
 
-        resp = _user_to_auth_response(user, access_token, client_token, False)
+        resp = _user_to_auth_response(user, access_token, client_token, False, _base_url(request))
         return JSONResponse(resp, status_code=201)
 
 
@@ -234,7 +268,7 @@ async def refresh(request: Request, body: RefreshRequest):
         _record_ip(user, _client_ip(request))
         access_token = _issue_token(user, client_token)
         await session.commit()
-        return _user_to_auth_response(user, access_token, client_token, body.requestUser)
+        return _user_to_auth_response(user, access_token, client_token, body.requestUser, _base_url(request))
 
 
 @router.post("/validate")
@@ -342,14 +376,14 @@ async def has_joined(request: Request):
                 return {
                     "id": user.uuid,
                     "name": user.display_name,
-                    "properties": _properties_to_list(user.properties),
+                    "properties": _user_properties(user, _base_url(request)),
                 }
 
         return _error("Failed to verify")
 
 
 @router.get("/profile/{profile_id}")
-async def get_profile(profile_id: str):
+async def get_profile(profile_id: str, request: Request):
     clean_id = profile_id.replace("-", "")
     async with get_session() as session:
         user = await _get_user_by_uuid(session, clean_id)
@@ -357,9 +391,59 @@ async def get_profile(profile_id: str):
             return {
                 "id": user.uuid,
                 "name": user.display_name,
-                "properties": _properties_to_list(user.properties),
+                "properties": _user_properties(user, _base_url(request)),
             }
         return _error("Profile not found", 404)
+
+
+@router.get("/skin/{profile_id}")
+async def get_skin(profile_id: str):
+    clean_id = profile_id.replace("-", "")
+    async with get_session() as session:
+        user = await _get_user_by_uuid(session, clean_id)
+        if not user or not user.skin:
+            return JSONResponse(content={"error": "Skin not found"}, status_code=404)
+        try:
+            data = base64.b64decode(user.skin)
+        except Exception:
+            return JSONResponse(content={"error": "Skin not found"}, status_code=404)
+        return Response(content=data, media_type="image/png")
+
+
+@router.post("/skin")
+async def upload_skin(request: Request, file: UploadFile = File(...), model: str = Form("classic")):
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+    async with get_session() as session:
+        user = await _get_user_by_token(session, token)
+        if not user:
+            return _error("Invalid token")
+        data = await file.read()
+        if len(data) > 10 * 1024 * 1024:
+            return _error("Skin file too large")
+        ctype = (file.content_type or "").lower()
+        if ctype not in ("image/png", "image/jpeg"):
+            return _error("Skin must be a PNG or JPEG image")
+        skin_model = (model or "classic").strip().lower()
+        if skin_model not in ("classic", "slim"):
+            skin_model = "classic"
+        user.skin = base64.b64encode(data).decode("ascii")
+        user.skin_model = skin_model
+        await session.commit()
+        return {"status": "updated", "has_skin": True, "model": skin_model}
+
+
+@router.post("/skin/remove")
+async def remove_skin(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+    async with get_session() as session:
+        user = await _get_user_by_token(session, token)
+        if not user:
+            return _error("Invalid token")
+        user.skin = ""
+        await session.commit()
+        return {"status": "removed"}
 
 
 @router.get("/admin/users", dependencies=[Depends(require_admin)])

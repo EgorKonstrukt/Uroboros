@@ -26,6 +26,10 @@ def _migrate(conn):
         conn.execute(text("ALTER TABLE users ADD COLUMN last_ip VARCHAR(64) NOT NULL DEFAULT ''"))
     if "ip_history" not in users:
         conn.execute(text("ALTER TABLE users ADD COLUMN ip_history TEXT NOT NULL DEFAULT '{}'"))
+    if "skin" not in users:
+        conn.execute(text("ALTER TABLE users ADD COLUMN skin TEXT NOT NULL DEFAULT ''"))
+    if "skin_model" not in users:
+        conn.execute(text("ALTER TABLE users ADD COLUMN skin_model VARCHAR(16) NOT NULL DEFAULT 'classic'"))
     sessions = _column_names(conn, "server_sessions")
     if "expires_at" not in sessions:
         conn.execute(text("ALTER TABLE server_sessions ADD COLUMN expires_at DATETIME"))
@@ -34,7 +38,6 @@ def _migrate(conn):
     instances = _column_names(conn, "instances")
     if "whitelist_enabled" not in instances:
         conn.execute(text("ALTER TABLE instances ADD COLUMN whitelist_enabled BOOLEAN NOT NULL DEFAULT 0"))
-    conn.execute(text("UPDATE users SET access_token_hash='', client_token_hash='', token_expires_at=NULL"))
 
 
 class DatabaseManager:

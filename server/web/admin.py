@@ -1146,13 +1146,62 @@ async def _instance_names() -> dict:
     return {i.id: i.name for i in instances}
 
 
+_online_probe_cache = {"ts": 0.0, "data": {}}
+ONLINE_CACHE_TTL = 5.0
+
+
+async def _probe_online_players() -> dict:
+    now = time.time()
+    if now - _online_probe_cache["ts"] < ONLINE_CACHE_TTL:
+        return _online_probe_cache["data"]
+    from server.web import _server_address
+    from server.mc.status import probe
+    from server.mc.pidfile import is_running as pid_running
+
+    instances = await load_instances()
+    tasks = []
+    entries = []
+    for inst in instances:
+        if not inst.enabled:
+            continue
+        running = get_manager_sync(inst).is_running() or pid_running(inst.id)
+        if not running:
+            continue
+        host, port = _server_address(inst)
+        entries.append((inst.id, inst.name or inst.id))
+        tasks.append(asyncio.to_thread(probe, host, port, 2.0))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+    online_by_name = {}
+    for (iid, iname), status in zip(entries, results):
+        if isinstance(status, Exception) or not status.get("online"):
+            continue
+        for entry in status.get("players_sample") or []:
+            name = (entry.get("name") or "").strip()
+            if name:
+                online_by_name[name.lower()] = {
+                    "instance_id": iid,
+                    "instance_name": iname,
+                }
+    _online_probe_cache["ts"] = now
+    _online_probe_cache["data"] = online_by_name
+    return online_by_name
+
+
 @router.get("/users")
 async def admin_list_users():
     now = datetime.now()
     async with get_session() as session:
         users = (await session.execute(select(UserModel).order_by(UserModel.id))).scalars().all()
+        sessions = (await session.execute(select(ServerSessionModel))).scalars().all()
     from server.mc.bans import _match_reasons, _active_ban_rows
     inst_names = await _instance_names()
+    last_seen_by = {}
+    for s in sessions:
+        key = (s.display_name or "").lower()
+        if s.created_at and (key not in last_seen_by or s.created_at > last_seen_by[key]):
+            last_seen_by[key] = s.created_at
+    online_map = await _probe_online_players()
     active_rows = [r for r in await _active_ban_rows()
                    if r[0].expires_at is None or r[0].expires_at > now]
     bans_by_user = {}
@@ -1170,6 +1219,18 @@ async def admin_list_users():
             "display_name": u.display_name,
             "email": u.email,
             "last_ip": u.last_ip or "",
+            "ip_history": [
+                {"ip": ip, "last_seen": ts}
+                for ip, ts in sorted(
+                    (u.ip_history or {}).items(), key=lambda kv: kv[1], reverse=True
+                )
+            ],
+            "has_skin": bool(u.skin),
+            "skin_model": u.skin_model or "classic",
+            "online": bool(online_map.get((u.display_name or "").lower())),
+            "current_server": (online_map.get((u.display_name or "").lower()) or {}).get("instance_id", ""),
+            "current_server_name": (online_map.get((u.display_name or "").lower()) or {}).get("instance_name", ""),
+            "last_seen": str(last_seen_by.get((u.display_name or "").lower(), "")) if last_seen_by.get((u.display_name or "").lower()) else "",
             "created_at": str(u.created_at),
             "bans": [
                 {
@@ -1222,6 +1283,34 @@ async def admin_change_nickname(user_id: int, body: dict):
     return {"status": "updated", "display_name": new_nick}
 
 
+@router.post("/users/{user_id}/email")
+async def admin_change_email(user_id: int, body: dict):
+    new_email = (body.get("email") or "").strip()
+    if not new_email:
+        return JSONResponse(content={"error": "Email is required"}, status_code=400)
+    if len(new_email) > 255:
+        return JSONResponse(content={"error": "Email too long (max 255 characters)"}, status_code=400)
+    if "@" not in new_email or "." not in new_email.split("@")[-1]:
+        return JSONResponse(content={"error": "Invalid email address"}, status_code=400)
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+        dup = await session.execute(select(UserModel).where(
+            (UserModel.email == new_email) | (UserModel.username == new_email)
+        ))
+        dup_user = dup.scalar_one_or_none()
+        if dup_user is not None and dup_user.id != user.id:
+            return JSONResponse(content={"error": "Email already in use"}, status_code=409)
+        old_email = user.email
+        user.email = new_email
+        if old_email and user.username == old_email:
+            user.username = new_email
+        await session.commit()
+    await sync_all_bans()
+    return {"status": "updated", "email": new_email}
+
+
 @router.post("/users/{user_id}/password")
 async def admin_change_password(user_id: int, body: dict):
     new_password = body.get("password") or ""
@@ -1239,6 +1328,47 @@ async def admin_change_password(user_id: int, body: dict):
         user.token_expires_at = None
         await session.commit()
     return {"status": "updated"}
+
+
+MAX_SKIN_SIZE = 10 * 1024 * 1024
+ALLOWED_SKIN_TYPES = {"image/png", "image/jpeg"}
+
+
+def _validate_skin_model(model: str) -> str:
+    model = (model or "classic").strip().lower()
+    return model if model in ("classic", "slim") else "classic"
+
+
+@router.post("/users/{user_id}/skin")
+async def admin_upload_skin(user_id: int, file: UploadFile = File(...), model: str = Form("classic")):
+    data = await file.read()
+    if len(data) > MAX_SKIN_SIZE:
+        return JSONResponse(content={"error": "Skin file too large (max 10 MB)"}, status_code=400)
+    ctype = (file.content_type or "").lower()
+    if ctype not in ALLOWED_SKIN_TYPES:
+        return JSONResponse(content={"error": "Skin must be a PNG or JPEG image"}, status_code=400)
+    skin_model = _validate_skin_model(model)
+    import base64
+    encoded = base64.b64encode(data).decode("ascii")
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+        user.skin = encoded
+        user.skin_model = skin_model
+        await session.commit()
+    return {"status": "updated", "has_skin": True, "model": skin_model}
+
+
+@router.delete("/users/{user_id}/skin")
+async def admin_remove_skin(user_id: int):
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+        user.skin = ""
+        await session.commit()
+    return {"status": "removed"}
 
 
 @router.post("/users/{user_id}/ban")

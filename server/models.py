@@ -44,6 +44,8 @@ class UserModel(Base):
     properties: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     last_ip: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     ip_history: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    skin: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    skin_model: Mapped[str] = mapped_column(String(16), nullable=False, default="classic")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

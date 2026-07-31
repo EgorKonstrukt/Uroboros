@@ -137,6 +137,43 @@ class YggdrasilAuth:
             "serverId": server_id,
         })
 
+    def upload_skin(self, access_token: str, file_path, model: str = "classic") -> dict:
+        if model not in ("classic", "slim"):
+            model = "classic"
+        with open(file_path, "rb") as f:
+            resp = requests.post(
+                f"{self.auth_url}/skin",
+                headers={"Authorization": f"Bearer {access_token}"},
+                files={"file": f},
+                data={"model": model},
+                timeout=REQUEST_TIMEOUT * 4,
+                verify=self.verify_ssl,
+            )
+        if resp.status_code != 200:
+            try:
+                data = resp.json()
+                msg = data.get("errorMessage") or data.get("error") or str(resp.status_code)
+            except ValueError:
+                msg = f"HTTP {resp.status_code}"
+            raise RuntimeError(msg)
+        return resp.json()
+
+    def remove_skin(self, access_token: str) -> dict:
+        resp = requests.post(
+            f"{self.auth_url}/skin/remove",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=REQUEST_TIMEOUT,
+            verify=self.verify_ssl,
+        )
+        if resp.status_code != 200:
+            try:
+                data = resp.json()
+                msg = data.get("errorMessage") or data.get("error") or str(resp.status_code)
+            except ValueError:
+                msg = f"HTTP {resp.status_code}"
+            raise RuntimeError(msg)
+        return resp.json()
+
     def has_joined(self, username: str, server_id: str) -> Optional[dict]:
         try:
             resp = requests.get(
