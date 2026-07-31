@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QSpinBox, QFileDialog, QPushButton, QLabel, QLineEdit, QCheckBox
 
 from launcher.config import LauncherConfig
+from launcher.utils.storage import set_work_dir, ensure_dirs
 
 
 class SettingsDialog(QDialog):
@@ -52,6 +53,14 @@ class SettingsDialog(QDialog):
         self.java_args = QLineEdit(self)
         form.addRow("JVM Args:", self.java_args)
 
+        self.game_dir_input = QLineEdit(self)
+        dir_browse = QPushButton("Browse", self)
+        dir_browse.clicked.connect(self._browse_game_dir)
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(self.game_dir_input)
+        dir_row.addWidget(dir_browse)
+        form.addRow("Game Directory:", dir_row)
+
         self.verify_ssl = QCheckBox("Verify TLS certificate (uncheck for self-signed)", self)
         form.addRow("TLS:", self.verify_ssl)
 
@@ -75,6 +84,7 @@ class SettingsDialog(QDialog):
         self.min_mem.setValue(self.config.min_memory)
         self.max_mem.setValue(self.config.max_memory)
         self.java_args.setText(self.config.java_args)
+        self.game_dir_input.setText(self.config.work_dir)
         self.verify_ssl.setChecked(self.config.verify_ssl)
 
     def _browse_java(self):
@@ -85,6 +95,12 @@ class SettingsDialog(QDialog):
         if path:
             self.java_path_input.setText(path)
 
+    def _browse_game_dir(self):
+        start = self.game_dir_input.text().strip() or ""
+        path = QFileDialog.getExistingDirectory(self, "Select Game Directory", start)
+        if path:
+            self.game_dir_input.setText(path)
+
     def _save(self):
         self.config.api_url = self.api_url_input.text().strip()
         self.config.project_id = self.project_id_input.text().strip()
@@ -92,6 +108,9 @@ class SettingsDialog(QDialog):
         self.config.min_memory = self.min_mem.value()
         self.config.max_memory = self.max_mem.value()
         self.config.java_args = self.java_args.text()
+        self.config.work_dir = self.game_dir_input.text().strip()
         self.config.verify_ssl = self.verify_ssl.isChecked()
+        set_work_dir(self.config.work_dir)
+        ensure_dirs()
         self.config.save()
         self.accept()

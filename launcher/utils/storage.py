@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def get_launcher_dir() -> Path:
@@ -14,7 +15,7 @@ def get_launcher_dir() -> Path:
 
 
 def get_projects_dir() -> Path:
-    return get_launcher_dir() / "projects"
+    return get_work_dir() / "projects"
 
 
 def get_project_dir(project_id: str) -> Path:
@@ -25,7 +26,17 @@ def get_modpack_dir(project_id: str, modpack_id: str) -> Path:
     return get_project_dir(project_id) / "modpacks" / modpack_id
 
 
+_work_dir_override: Optional[Path] = None
+
+
+def set_work_dir(path) -> None:
+    global _work_dir_override
+    _work_dir_override = Path(path).expanduser() if path else None
+
+
 def get_work_dir() -> Path:
+    if _work_dir_override:
+        return _work_dir_override
     return get_launcher_dir() / "work"
 
 

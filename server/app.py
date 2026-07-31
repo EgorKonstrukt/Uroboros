@@ -11,6 +11,11 @@ from server.web import projects_router, launcher_router, news_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await _migrate_modpacks_from_json()
+    from server.mc.whitelist import sync_all_whitelists
+    try:
+        await sync_all_whitelists()
+    except Exception:
+        pass
     yield
 
 

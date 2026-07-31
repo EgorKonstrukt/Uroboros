@@ -92,7 +92,8 @@ async def update_instance(config: InstanceModel) -> bool:
                      "server_dir", "server_filename", "java_executable_path",
                      "max_memory", "min_memory", "additional_flags", "arguments",
                      "api_url", "auth_plugin", "injector_filename",
-                     "auto_restart", "auto_accept_eula", "version", "jar_url",
+                     "auto_restart", "auto_accept_eula", "whitelist_enabled",
+                     "version", "jar_url",
                      "modpack_id"):
             setattr(existing, key, getattr(config, key))
         await session.commit()
@@ -163,6 +164,7 @@ def migrate_instances_from_json():
                     injector_filename=item.get("injector_filename", "authlib-injector.jar"),
                     auto_restart=item.get("auto_restart", False),
                     auto_accept_eula=item.get("auto_accept_eula", True),
+                    whitelist_enabled=item.get("whitelist_enabled", False),
                     version=item.get("version", ""),
                     jar_url=item.get("jar_url", ""),
                 )

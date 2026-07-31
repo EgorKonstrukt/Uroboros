@@ -980,6 +980,22 @@ async function installServerModpack() {
     btn.textContent = 'Install Modpack';
 }
 
+async function syncServerWhitelist() {
+    if (!currentServerId) return;
+    var btn = document.getElementById('detailBtnSyncWhitelist');
+    btn.disabled = true;
+    btn.textContent = 'Syncing...';
+    try {
+        var r = await apiFetch('/admin/instances/' + currentServerId + '/whitelist/sync', { method: 'POST' });
+        if (!r) return;
+        var d = await r.json();
+        if (d.error) { toast(d.error, 'error'); }
+        else { toast('Whitelist synced: ' + d.count + ' players', 'success'); }
+    } catch (e) { toast('Failed: ' + e.message, 'error'); }
+    btn.disabled = false;
+    btn.textContent = 'Sync Whitelist';
+}
+
 async function refreshServerOutput() {
     if (!currentServerId || consolePaused || currentSubTab !== 'console') return;
     try {

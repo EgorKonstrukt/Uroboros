@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import shlex
 import shutil
 import subprocess
 import zipfile
@@ -16,6 +15,29 @@ from launcher.game.version_manager import VersionManager
 from launcher.game.libraries_matcher import LibrariesMatcher, get_native_classifier_key
 from launcher.game.java_manager import JavaManager
 from launcher.api.auth import YggdrasilSession
+
+
+def split_args(text: str) -> list:
+    result = []
+    buf = []
+    quote = ""
+    for ch in text or "":
+        if quote:
+            if ch == quote:
+                quote = ""
+            else:
+                buf.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch.isspace():
+            if buf:
+                result.append("".join(buf))
+                buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        result.append("".join(buf))
+    return result
 
 
 class GameStarter:
@@ -100,7 +122,7 @@ class GameStarter:
             if "${" in arg:
                 continue
             args.append(arg)
-        args.extend(shlex.split(extra_args))
+        args.extend(split_args(extra_args))
         return args
 
     def _build_placeholders(self, meta, gdir: str, session: YggdrasilSession) -> dict:
@@ -158,7 +180,7 @@ class GameStarter:
             ma = meta.minecraft_arguments or ""
             for key, val in args_dict.items():
                 ma = ma.replace(key, val)
-            game_args = shlex.split(ma)
+            game_args = split_args(ma)
 
         if server_address and server_port:
             mc_id = meta.inherits_from or meta.id
@@ -214,6 +236,7 @@ class GameStarter:
         if not classpath:
             raise RuntimeError(f"No libraries found for version {version_id}, run Install first")
 
+        self.version_manager.download_missing_natives(meta)
         natives_dir = self.extract_natives(meta)
         jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args, meta, gdir, session)
         log_cfg = get_log_config_path(version_id)

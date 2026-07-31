@@ -23,6 +23,7 @@ _INSTANCE_DEFAULTS = {
     "injector_filename": "authlib-injector.jar",
     "auto_restart": False,
     "auto_accept_eula": True,
+    "whitelist_enabled": False,
     "version": "",
     "jar_url": "",
 }
@@ -122,6 +123,7 @@ class InstanceModel(Base):
     injector_filename: Mapped[str] = mapped_column(String(255), default="authlib-injector.jar", nullable=False)
     auto_restart: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     auto_accept_eula: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    whitelist_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     version: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     jar_url: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

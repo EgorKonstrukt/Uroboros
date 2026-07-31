@@ -177,6 +177,12 @@ async def register(request: Request, body: RegisterRequest):
         access_token = _issue_token(user, client_token)
         await session.commit()
 
+        from server.mc.whitelist import sync_all_whitelists
+        try:
+            await sync_all_whitelists()
+        except Exception:
+            pass
+
         resp = _user_to_auth_response(user, access_token, client_token, False)
         return JSONResponse(resp, status_code=201)
 

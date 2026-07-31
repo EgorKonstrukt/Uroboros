@@ -22,6 +22,17 @@ from launcher.utils.async_worker import run_async
 from launcher.utils.progress import CancelledError
 
 
+INSTALL_MARKER = "installed.marker"
+
+
+def _is_modpack_installed(mp_dir) -> bool:
+    if not mp_dir.exists():
+        return False
+    if (mp_dir / INSTALL_MARKER).exists():
+        return True
+    return any(p for p in mp_dir.iterdir() if p.name != INSTALL_MARKER)
+
+
 class _GameSignals(QObject):
     exited = pyqtSignal()
     progress = pyqtSignal(object)
@@ -234,7 +245,7 @@ class MainWindow(QWidget):
 
         for m in self.modpacks:
             mp_dir = get_modpack_dir(self.project["id"], m["id"])
-            installed = mp_dir.exists() and any(mp_dir.iterdir())
+            installed = _is_modpack_installed(mp_dir)
             card = ModpackCard(m, installed=installed, game_running=self._game_running, parent=self.cards_widget)
             card.install_clicked.connect(self._on_install_clicked)
             card.play_clicked.connect(self._on_play_clicked)
@@ -286,7 +297,7 @@ class MainWindow(QWidget):
     def _refresh_card_states(self):
         for card in self.modpack_cards:
             mp_dir = get_modpack_dir(self.project["id"], card.modpack["id"])
-            installed = mp_dir.exists() and any(mp_dir.iterdir())
+            installed = _is_modpack_installed(mp_dir)
             card.set_installed(installed, self._game_running)
 
     def _cancel_install(self):
@@ -349,6 +360,7 @@ class MainWindow(QWidget):
                         if actual != expected_hash:
                             raise IOError(f"Hash mismatch for {f['name']}")
                     self._update_progress(int((i + 1) / total * 100) if total > 0 else 100)
+                mp_dir.joinpath(INSTALL_MARKER).write_text("installed by Uroboros launcher", encoding="utf-8")
                 return True
             except CancelledError:
                 return "cancelled"
@@ -541,7 +553,7 @@ class MainWindow(QWidget):
 
     def _launch(self, m, version, java, session, server_address: str = "", server_port: str = ""):
         mp_dir = get_modpack_dir(self.project["id"], m["id"])
-        if not mp_dir.exists() or not any(mp_dir.iterdir()):
+        if not _is_modpack_installed(mp_dir):
             self.progress_bar.setVisible(False)
             self.status_label.setText("Modpack not installed")
             return

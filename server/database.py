@@ -27,6 +27,9 @@ def _migrate(conn):
         conn.execute(text("ALTER TABLE server_sessions ADD COLUMN expires_at DATETIME"))
     if "created_at" not in sessions:
         conn.execute(text("ALTER TABLE server_sessions ADD COLUMN created_at DATETIME"))
+    instances = _column_names(conn, "instances")
+    if "whitelist_enabled" not in instances:
+        conn.execute(text("ALTER TABLE instances ADD COLUMN whitelist_enabled BOOLEAN NOT NULL DEFAULT 0"))
     conn.execute(text("UPDATE users SET access_token_hash='', client_token_hash='', token_expires_at=NULL"))
 
 

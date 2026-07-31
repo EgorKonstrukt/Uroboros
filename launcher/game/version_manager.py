@@ -491,17 +491,14 @@ class VersionManager:
                 continue
             dl = lib.get("downloads", {})
             artifact = dl.get("artifact", {})
-            lib_url = artifact.get("url", "")
-            lib_path_str = artifact.get("path", "")
-            if not lib_url or not lib_path_str:
-                classifiers = dl.get("classifiers", {})
-                key = get_native_classifier_key(classifiers)
-                if key:
-                    native_artifact = classifiers[key]
-                    lib_url = native_artifact.get("url", "")
-                    lib_path_str = native_artifact.get("path", "")
-            if lib_url and lib_path_str:
-                targets.append((lib_url, lib_path_str))
+            if artifact.get("url") and artifact.get("path"):
+                targets.append((artifact["url"], artifact["path"]))
+            classifiers = dl.get("classifiers", {})
+            key = get_native_classifier_key(classifiers)
+            if key:
+                native = classifiers[key]
+                if native.get("url") and native.get("path"):
+                    targets.append((native["url"], native["path"]))
         total = len(targets)
         if total == 0:
             return
@@ -546,3 +543,29 @@ class VersionManager:
             futures = [executor.submit(work, t) for t in targets]
             for f in futures:
                 f.result()
+
+    def download_missing_natives(self, meta: VersionMeta):
+        libs_dir = get_libraries_dir()
+        session = get_session()
+        for lib in meta.libraries:
+            if not LibrariesMatcher.match_library(lib):
+                continue
+            classifiers = (lib.get("downloads", {}) or {}).get("classifiers", {})
+            key = get_native_classifier_key(classifiers)
+            if not key:
+                continue
+            native = classifiers[key]
+            path = native.get("path", "")
+            url = native.get("url", "")
+            if not path or not url:
+                continue
+            dest = libs_dir / path
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                resp = session.get(url, timeout=60)
+                if resp.status_code == 200:
+                    dest.write_bytes(resp.content)
+            except requests.RequestException:
+                pass

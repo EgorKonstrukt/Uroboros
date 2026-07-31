@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from typing import Optional
 
-from launcher.utils.storage import get_launcher_dir
+from launcher.utils.storage import get_launcher_dir, set_work_dir
 
 
 CONFIG_FILE = get_launcher_dir() / "config.json"
@@ -59,6 +59,7 @@ class LauncherConfig:
     account_uuid: str = ""
     account_name: str = ""
     account_properties: list = field(default_factory=list)
+    work_dir: str = ""
     verify_ssl: bool = True
     window_width: int = 1100
     window_height: int = 700
@@ -76,9 +77,11 @@ class LauncherConfig:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             valid = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-            return cls(**valid)
-        inst = cls()
-        inst.save()
+            inst = cls(**valid)
+        else:
+            inst = cls()
+            inst.save()
+        set_work_dir(inst.work_dir)
         return inst
 
 

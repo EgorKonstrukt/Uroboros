@@ -23,6 +23,7 @@ def instance_model_to_dict(inst: InstanceModel) -> dict:
         "injector_filename": inst.injector_filename,
         "auto_restart": inst.auto_restart,
         "auto_accept_eula": inst.auto_accept_eula,
+        "whitelist_enabled": inst.whitelist_enabled,
         "version": inst.version or "",
         "jar_url": inst.jar_url or "",
         "created_at": str(inst.created_at) if inst.created_at else "",
@@ -36,7 +37,8 @@ def dict_to_instance_model(data: dict, instance: Optional[InstanceModel] = None)
                 "server_dir", "server_filename", "java_executable_path",
                 "max_memory", "min_memory", "additional_flags", "arguments",
                 "api_url", "auth_plugin", "injector_filename",
-                "auto_restart", "auto_accept_eula", "version", "jar_url"):
+                "auto_restart", "auto_accept_eula", "whitelist_enabled",
+                "version", "jar_url"):
         if key in data:
             setattr(instance, key, data[key])
     if not instance.server_dir:

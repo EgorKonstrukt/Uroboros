@@ -29,6 +29,7 @@ from server.mc.registry import (
 )
 from server.mc.config import instance_model_to_dict, dict_to_instance_model
 from server.mc.pidfile import is_running
+from server.mc.whitelist import sync_instance_whitelist
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -52,6 +53,7 @@ _INSTANCE_FIELD_META = {
     "injector_filename": {"label": "Injector JAR", "description": "authlib-injector JAR filename"},
     "auto_restart": {"label": "Auto Restart", "description": "Automatically restart on crash"},
     "auto_accept_eula": {"label": "Auto Accept EULA", "description": "Write eula=true before starting"},
+    "whitelist_enabled": {"label": "Whitelist Mode", "description": "Enable whitelist and sync player nicknames from the database"},
     "version": {"label": "MC Version", "description": "Minecraft version (e.g. 1.20.1)"},
     "jar_url": {"label": "JAR Download URL", "description": "URL to download server JAR (optional)"},
     "project_id": {"label": "Linked Project ID", "description": "Project that this instance belongs to"},
@@ -229,6 +231,8 @@ async def update_instance_route(instance_id: str, body: dict):
         except Exception:
             pass
     if await update_instance(inst):
+        if inst.whitelist_enabled:
+            await sync_instance_whitelist(inst)
         return _instance_to_api(inst)
     return JSONResponse(content={"error": "Failed to update"}, status_code=500)
 
@@ -299,6 +303,8 @@ async def instance_start(instance_id: str):
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
     if mgr.is_running():
         return JSONResponse(content={"error": "Already running"}, status_code=400)
+    if inst.whitelist_enabled:
+        await sync_instance_whitelist(inst)
     if mgr.start():
         threading.Thread(target=mgr.process.wait, daemon=True).start()
         return {"status": "started", "pid": mgr.process.pid, "id": instance_id}
@@ -327,6 +333,18 @@ async def instance_restart(instance_id: str):
         return {"status": "restarted", "pid": mgr.process.pid, "id": instance_id}
     err = mgr.last_error or "Restart failed"
     return JSONResponse(content={"error": err}, status_code=500)
+
+
+@router.post("/instances/{instance_id}/whitelist/sync")
+async def instance_whitelist_sync(instance_id: str):
+    inst = await get_instance(instance_id)
+    if inst is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    result = await sync_instance_whitelist(inst)
+    mgr = await get_manager(instance_id)
+    if mgr and mgr.is_running():
+        mgr.send_command("whitelist reload")
+    return result
 
 
 @router.post("/instances/{instance_id}/install-modpack")

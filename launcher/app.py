@@ -14,8 +14,8 @@ class UroborosApplication:
         self.app.setApplicationName("Uroboros")
         self.app.setOrganizationName("Uroboros")
 
-        ensure_dirs()
         self.config = LauncherConfig.load()
+        ensure_dirs()
 
         self._load_theme()
 
