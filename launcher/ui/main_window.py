@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QPushButton, QProgressBar, QMenu,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
 
 from launcher.api.api_manager import APIManager
 from launcher.api.auth import YggdrasilSession, YggdrasilAuth
@@ -35,6 +35,7 @@ class MainWindow(QWidget):
         self.project = None
         self.modpacks = []
         self.modpack_cards = []
+        self.servers = []
         self._game_running = False
         self._cancel_requested = False
         self.starter = GameStarter()
@@ -45,6 +46,9 @@ class MainWindow(QWidget):
         self._game_signals.exited.connect(self._on_game_exited)
         self._game_signals.progress.connect(self._apply_progress)
         self._load_project()
+        self._server_timer = QTimer(self)
+        self._server_timer.timeout.connect(self._load_servers)
+        self._server_timer.start(30000)
 
     def _setup_ui(self):
         self.setObjectName("MainWindow")
@@ -67,6 +71,14 @@ class MainWindow(QWidget):
         """)
         self.account_btn.clicked.connect(self._on_account_clicked)
         header.addWidget(self.account_btn)
+        self.refresh_btn = QPushButton("Refresh", self)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton { background: #313244; color: #f9e2af; border: none;
+                border-radius: 6px; padding: 8px 18px; font-size: 13px; }
+            QPushButton:hover { background: #45475a; }
+        """)
+        self.refresh_btn.clicked.connect(self._refresh_all)
+        header.addWidget(self.refresh_btn)
         self.settings_btn = QPushButton("Settings", self)
         self.settings_btn.setStyleSheet("""
             QPushButton { background: #313244; color: #cdd6f4; border: none;
@@ -155,7 +167,7 @@ class MainWindow(QWidget):
         self.console.setMaximumHeight(150)
         layout.addWidget(self.console)
 
-    def _load_project(self):
+    def _load_project(self, force: bool = False):
         pid = self.config.project_id
         if not pid:
             self.loading_label.setText("No project configured. Open Settings and set a Project ID.")
@@ -163,6 +175,8 @@ class MainWindow(QWidget):
             return
 
         def do_fetch():
+            if force:
+                return self.api.get_project(pid), False
             try:
                 return self.api.get_project(pid), False
             except Exception:
@@ -224,8 +238,35 @@ class MainWindow(QWidget):
             card = ModpackCard(m, installed=installed, game_running=self._game_running, parent=self.cards_widget)
             card.install_clicked.connect(self._on_install_clicked)
             card.play_clicked.connect(self._on_play_clicked)
+            card.connect_clicked.connect(self._on_connect_clicked)
             self.cards_layout.addWidget(card)
             self.modpack_cards.append(card)
+        self._apply_servers()
+        self._load_servers()
+
+    def _load_servers(self):
+        pid = self.config.project_id
+        if not pid:
+            return
+
+        def do_fetch():
+            return self.api.get_servers(pid)
+
+        def on_done(servers):
+            self.servers = servers
+            self._apply_servers()
+
+        run_async(do_fetch, on_done=on_done, on_error=lambda err: None)
+
+    def _apply_servers(self):
+        for card in self.modpack_cards:
+            servers = [s for s in self.servers if s.get("modpack_id") == card.modpack.get("id")]
+            card.set_servers(servers)
+
+    def _refresh_all(self):
+        self.status_label.setText("Refreshing...")
+        self._load_project(force=True)
+        self._load_servers()
 
     def _on_install_clicked(self, modpack):
         self.current_modpack = modpack
@@ -234,6 +275,13 @@ class MainWindow(QWidget):
     def _on_play_clicked(self, modpack):
         self.current_modpack = modpack
         self._play()
+
+    def _on_connect_clicked(self, modpack, server):
+        self.current_modpack = modpack
+        self._play(
+            server_address=server.get("address", ""),
+            server_port=str(server.get("port", 25565)),
+        )
 
     def _refresh_card_states(self):
         for card in self.modpack_cards:
@@ -394,7 +442,7 @@ class MainWindow(QWidget):
         self.detail_label.setText("  |  ".join(parts))
 
     def _make_offline_session(self):
-        name = self.config.player_name.strip() or "Player"
+        name = self.config.account_name.strip() or "Player"
         profile_uuid = hashlib.md5(f"OfflinePlayer:{name}".encode()).hexdigest()
         return YggdrasilSession(
             access_token="0",
@@ -407,7 +455,7 @@ class MainWindow(QWidget):
             user_properties=[],
         )
 
-    def _play(self):
+    def _play(self, server_address: str = "", server_port: str = ""):
         m = self.current_modpack
         if not m or self._game_running:
             return
@@ -471,7 +519,7 @@ class MainWindow(QWidget):
                 self._refresh_card_states()
                 return
             java, eff_version, session = result
-            self._launch(m, eff_version, java, session)
+            self._launch(m, eff_version, java, session, server_address, server_port)
 
         def on_error(err):
             self.progress_bar.setVisible(False)
@@ -479,10 +527,15 @@ class MainWindow(QWidget):
             self.detail_label.setText("")
             self.status_label.setText(f"Prepare failed: {err}")
             self._refresh_card_states()
+            if "Session expired" in err:
+                self.status_label.setText("Session expired — please log in")
+                self._open_login()
+                if self.config.account_name:
+                    self.status_label.setText(f"Logged in as {self.config.account_name}. Click Play to start.")
 
         run_async(do_prepare, on_done=on_done, on_error=on_error)
 
-    def _launch(self, m, version, java, session):
+    def _launch(self, m, version, java, session, server_address: str = "", server_port: str = ""):
         mp_dir = get_modpack_dir(self.project["id"], m["id"])
         if not mp_dir.exists() or not any(mp_dir.iterdir()):
             self.progress_bar.setVisible(False)
@@ -509,6 +562,8 @@ class MainWindow(QWidget):
                     max_mem=xmx,
                     min_mem=xms,
                     extra_jvm_args=jvm_args,
+                    server_address=server_address,
+                    server_port=server_port,
                     output_callback=lambda text: self.console.append(text),
                     on_exit=self._game_signals.exited.emit,
                     game_dir=str(mp_dir),
@@ -603,6 +658,11 @@ class MainWindow(QWidget):
             try:
                 auth.refresh(self.config.access_token, self.config.client_token)
             except Exception:
+                self.config.access_token = ""
+                self.config.client_token = ""
+                self.config.account_properties = []
+                self.config.save()
+                self._update_account_button()
                 raise RuntimeError("Session expired, please log in again")
             self.config.access_token = auth.session.access_token
             self.config.client_token = auth.session.client_token

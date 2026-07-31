@@ -54,7 +54,6 @@ class LauncherConfig:
     java_args: str = "-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC"
     min_memory: int = 1024
     max_memory: int = 2048
-    player_name: str = "Player"
     access_token: str = ""
     client_token: str = ""
     account_uuid: str = ""

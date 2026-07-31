@@ -29,10 +29,6 @@ class SettingsDialog(QDialog):
         self.project_id_input = QLineEdit(self)
         form.addRow("Project ID:", self.project_id_input)
 
-        self.player_name_input = QLineEdit(self)
-        self.player_name_input.setMaxLength(16)
-        form.addRow("Player Name:", self.player_name_input)
-
         self.java_path_input = QLineEdit(self)
         java_browse = QPushButton("Browse", self)
         java_browse.clicked.connect(self._browse_java)
@@ -75,7 +71,6 @@ class SettingsDialog(QDialog):
     def _load_config(self):
         self.api_url_input.setText(self.config.api_url)
         self.project_id_input.setText(self.config.project_id)
-        self.player_name_input.setText(self.config.player_name)
         self.java_path_input.setText(self.config.java_path)
         self.min_mem.setValue(self.config.min_memory)
         self.max_mem.setValue(self.config.max_memory)
@@ -93,8 +88,6 @@ class SettingsDialog(QDialog):
     def _save(self):
         self.config.api_url = self.api_url_input.text().strip()
         self.config.project_id = self.project_id_input.text().strip()
-        name = self.player_name_input.text().strip()
-        self.config.player_name = name if name else "Player"
         self.config.java_path = self.java_path_input.text()
         self.config.min_memory = self.min_mem.value()
         self.config.max_memory = self.max_mem.value()

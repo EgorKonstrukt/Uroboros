@@ -118,7 +118,7 @@ class YggdrasilAuth:
                 payload["clientToken"] = client_token
             self._make_request("validate", payload)
             return True
-        except requests.RequestException:
+        except (requests.RequestException, RuntimeError):
             return False
 
     def signout(self, username: str, password: str):

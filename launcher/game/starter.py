@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import shlex
 import shutil
@@ -139,9 +140,19 @@ class GameStarter:
             game_args = shlex.split(ma)
 
         if server_address and server_port:
-            game_args.extend(["--server", server_address, "--port", server_port])
+            if self._mc_version_tuple(meta.id) >= (1, 20, 2):
+                game_args.extend(["--quickPlayMultiplayer", f"{server_address}:{server_port}"])
+            else:
+                game_args.extend(["--server", server_address, "--port", server_port])
 
         return game_args
+
+    @staticmethod
+    def _mc_version_tuple(version_id: str) -> tuple:
+        m = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", version_id or "")
+        if not m:
+            return (0, 0, 0)
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
 
     def _resolve_java(self, java_path: str, meta) -> str:
         if java_path and java_path.strip().lower() != "java":

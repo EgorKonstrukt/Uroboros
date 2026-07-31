@@ -1,16 +1,18 @@
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class ModpackCard(QFrame):
     install_clicked = pyqtSignal(object)
     play_clicked = pyqtSignal(object)
+    connect_clicked = pyqtSignal(object, object)
 
     def __init__(self, modpack: dict, installed: bool = False, game_running: bool = False, parent=None):
         super().__init__(parent)
         self.modpack = modpack
         self._installed = installed
         self._game_running = game_running
+        self._servers = []
 
         self.setObjectName("ModpackCard")
         self.setStyleSheet("""
@@ -59,6 +61,10 @@ class ModpackCard(QFrame):
             desc.setMaximumHeight(36)
             layout.addWidget(desc)
 
+        self.servers_container = QVBoxLayout()
+        self.servers_container.setSpacing(4)
+        layout.addLayout(self.servers_container)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
@@ -99,3 +105,66 @@ class ModpackCard(QFrame):
             self.play_btn.setStyleSheet(self._btn_style("#a6e3a1", "#111", "#b8f0b5"))
         else:
             self.play_btn.setStyleSheet(self._btn_style("#45475a", "#6c7086"))
+        if self._servers:
+            self.set_servers(self._servers)
+
+    def set_servers(self, servers: list):
+        self._servers = servers or []
+        while self.servers_container.count():
+            item = self.servers_container.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        if not self._servers:
+            return
+
+        header = QLabel("Servers", self)
+        header.setStyleSheet("font-size: 12px; font-weight: bold; color: #9399b2; margin-top: 4px;")
+        self.servers_container.addWidget(header)
+
+        for s in self._servers:
+            row = QWidget(self)
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(8)
+            label = QLabel(self._server_text(s), row)
+            label.setStyleSheet(f"font-size: 12px; color: {self._server_color(s)};")
+            h.addWidget(label)
+            h.addStretch()
+
+            btn = QPushButton("Connect", row)
+            can_connect = bool(s.get("online")) and not self._game_running
+            btn.setEnabled(can_connect)
+            btn.setStyleSheet(
+                self._btn_style("#f9e2af", "#111", "#fbf0d3") if can_connect
+                else self._btn_style("#45475a", "#6c7086")
+            )
+            btn.clicked.connect(lambda checked=False, srv=s: self.connect_clicked.emit(self.modpack, srv))
+            h.addWidget(btn)
+            self.servers_container.addWidget(row)
+
+    def _server_text(self, s: dict) -> str:
+        name = s.get("name") or "Server"
+        if s.get("running") and not s.get("online"):
+            return f"{name}: starting..."
+        if s.get("online"):
+            parts = [f"{name}: Online"]
+            ping = s.get("latency_ms")
+            if ping is not None:
+                parts.append(f"{ping} ms")
+            po = s.get("players_online")
+            pm = s.get("players_max")
+            if po is not None:
+                parts.append(f"{po}/{pm} players")
+            ver = s.get("version")
+            if ver:
+                parts.append(ver)
+            return "  |  ".join(parts)
+        return f"{name}: Offline"
+
+    def _server_color(self, s: dict) -> str:
+        if s.get("running") and not s.get("online"):
+            return "#f9e2af"
+        if s.get("online"):
+            return "#a6e3a1"
+        return "#f38ba8"
