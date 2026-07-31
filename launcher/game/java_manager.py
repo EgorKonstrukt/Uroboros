@@ -1,3 +1,4 @@
+import os
 import re
 import sys
 import zipfile
@@ -48,16 +49,50 @@ class JavaManager:
         except requests.RequestException:
             return []
 
+    @staticmethod
+    def _system_java_dirs() -> list:
+        dirs = []
+        env_home = os.environ.get("JAVA_HOME")
+        if env_home:
+            dirs.append(Path(env_home))
+        if sys.platform == "win32":
+            for base in (
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+                Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
+            ):
+                if not base.exists():
+                    continue
+                for sub in ("Java", "Eclipse Adoptium", "Zulu", "Microsoft", "Temurin", "jdk"):
+                    p = base / sub
+                    if p.exists():
+                        dirs.append(p)
+        else:
+            for p in (Path("/usr/lib/jvm"), Path("/usr/java"), Path("/opt/java")):
+                if p.exists():
+                    dirs.append(p)
+        return dirs
+
     def find_java(self, version: int = 17) -> Optional[str]:
+        candidates = []
         system_java = shutil.which("java")
-        if system_java and self.matches_version(system_java, version):
-            return system_java
+        if system_java:
+            candidates.append(Path(system_java))
         java_dir = get_java_dir()
         if java_dir.exists():
+            candidates.append(java_dir)
+        candidates.extend(self._system_java_dirs())
+        for base in candidates:
+            if not base.exists():
+                continue
+            if base.is_file() and base.name in ("java", "java.exe", "javaw.exe"):
+                if self.matches_version(str(base), version):
+                    return str(base)
+                continue
             if sys.platform == "win32":
-                javas = list(java_dir.rglob("javaw.exe")) + list(java_dir.rglob("java.exe"))
+                javas = list(base.rglob("java.exe")) + list(base.rglob("javaw.exe"))
             else:
-                javas = list(java_dir.rglob("java"))
+                javas = list(base.rglob("java"))
             for j in javas:
                 if j.is_file() and self.matches_version(str(j), version):
                     return str(j)

@@ -26,12 +26,14 @@ class GameStarter:
     def _get_classpath(self, version_id: str, meta) -> str:
         libs = LibrariesMatcher.filter_libraries(meta.libraries)
         cp_parts = []
+        seen = set()
         libs_dir = get_libraries_dir()
         for artifact in libs:
             path = artifact.get("path", "")
             if path:
                 lib_path = libs_dir / path
-                if lib_path.exists():
+                if lib_path.exists() and str(lib_path) not in seen:
+                    seen.add(str(lib_path))
                     cp_parts.append(str(lib_path))
         jar_path = get_versions_dir() / version_id / f"{version_id}.jar"
         if jar_path.exists():
@@ -77,14 +79,54 @@ class GameStarter:
                 continue
         return natives_dir
 
-    def _get_jvm_args(self, java_path: str, max_mem: int, min_mem: int, extra_args: str) -> list:
+    def _get_jvm_args(self, java_path: str, max_mem: int, min_mem: int, extra_args: str,
+                      meta, gdir: str = "", session: YggdrasilSession = None) -> list:
         args = [
             java_path,
             f"-Xmx{max_mem}M",
             f"-Xms{min_mem}M",
         ]
+        placeholders = self._build_placeholders(meta, gdir, session)
+        jvm_section = meta.arguments.get("jvm", []) if isinstance(meta.arguments, dict) else []
+        for arg in jvm_section:
+            if not isinstance(arg, str):
+                continue
+            if arg == "-cp" or arg == "--classpath" or "${classpath}" in arg:
+                continue
+            if arg.startswith("-Djava.library.path=") or arg.startswith("-Dlog4j.configurationFile="):
+                continue
+            for key, val in placeholders.items():
+                arg = arg.replace(key, val)
+            if "${" in arg:
+                continue
+            args.append(arg)
         args.extend(shlex.split(extra_args))
         return args
+
+    def _build_placeholders(self, meta, gdir: str, session: YggdrasilSession) -> dict:
+        auth_uuid = session.uuid.replace("-", "") if session.uuid else ""
+        return {
+            "${auth_player_name}": session.display_name or session.username,
+            "${auth_session}": session.access_token,
+            "${auth_access_token}": session.access_token,
+            "${auth_uuid}": auth_uuid,
+            "${version_name}": meta.id,
+            "${game_assets}": str(get_assets_dir()),
+            "${assets_root}": str(get_assets_dir()),
+            "${assets_index_name}": meta.assets,
+            "${game_directory}": gdir,
+            "${user_properties}": self._user_properties_arg(session.user_properties),
+            "${user_type}": "mojang",
+            "${version_type}": meta.type,
+            "${natives_directory}": str(get_work_dir() / "natives"),
+            "${classpath_separator}": os.pathsep,
+            "${library_directory}": str(get_libraries_dir()),
+            "${classpath}": self._get_classpath(meta.id, meta),
+            "${clientid}": "",
+            "${auth_xuid}": "0",
+            "${launcher_name}": "Uroboros",
+            "${launcher_version}": "1.0",
+        }
 
     def _user_properties_arg(self, user_props) -> str:
         items = []
@@ -100,28 +142,7 @@ class GameStarter:
 
     def _get_game_args(self, meta, session: YggdrasilSession, game_dir: str = "", server_address: str = "", server_port: str = "") -> list:
         gdir = game_dir or str(get_work_dir())
-        auth_uuid = session.uuid.replace("-", "") if session.uuid else ""
-        user_props = session.user_properties
-        args_dict = {
-            "${auth_player_name}": session.display_name or session.username,
-            "${auth_session}": session.access_token,
-            "${auth_access_token}": session.access_token,
-            "${auth_uuid}": auth_uuid,
-            "${version_name}": meta.id,
-            "${game_assets}": str(get_assets_dir()),
-            "${assets_root}": str(get_assets_dir()),
-            "${assets_index_name}": meta.assets,
-            "${game_directory}": gdir,
-            "${user_properties}": self._user_properties_arg(user_props),
-            "${user_type}": "mojang",
-            "${version_type}": meta.type,
-            "${natives_directory}": str(get_work_dir() / "natives"),
-            "${classpath_separator}": os.pathsep,
-            "${library_directory}": str(get_libraries_dir()),
-            "${classpath}": self._get_classpath(meta.id, meta),
-            "${clientid}": "",
-            "${auth_xuid}": "0",
-        }
+        args_dict = self._build_placeholders(meta, gdir, session)
 
         game_args = []
         args = meta.arguments if isinstance(meta.arguments, dict) else {}
@@ -140,7 +161,8 @@ class GameStarter:
             game_args = shlex.split(ma)
 
         if server_address and server_port:
-            if self._mc_version_tuple(meta.id) >= (1, 20, 2):
+            mc_id = meta.inherits_from or meta.id
+            if self._mc_version_tuple(mc_id) >= (1, 20, 2):
                 game_args.extend(["--quickPlayMultiplayer", f"{server_address}:{server_port}"])
             else:
                 game_args.extend(["--server", server_address, "--port", server_port])
@@ -157,7 +179,11 @@ class GameStarter:
     def _resolve_java(self, java_path: str, meta) -> str:
         if java_path and java_path.strip().lower() != "java":
             return java_path
-        required = int(meta.java_version.get("major") or 0) or 0
+        required = int(
+            meta.java_version.get("majorVersion")
+            or meta.java_version.get("major")
+            or 0
+        ) or 0
         manager = JavaManager()
         found = manager.find_java(required) if required else manager.find_java()
         return found or (java_path if java_path else "java")
@@ -189,7 +215,7 @@ class GameStarter:
             raise RuntimeError(f"No libraries found for version {version_id}, run Install first")
 
         natives_dir = self.extract_natives(meta)
-        jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args)
+        jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args, meta, gdir, session)
         log_cfg = get_log_config_path(version_id)
         if log_cfg.exists():
             jvm_args.append(f"-Dlog4j.configurationFile={log_cfg}")

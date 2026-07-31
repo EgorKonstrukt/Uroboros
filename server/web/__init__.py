@@ -29,7 +29,7 @@ def _get_modpack_file_count(project_id: str, modpack_id: str) -> int:
     mp_dir = _modpack_dir(project_id, modpack_id)
     if not mp_dir.exists():
         return 0
-    return len([f for f in mp_dir.iterdir() if f.is_file()])
+    return len([f for f in mp_dir.rglob("*") if f.is_file() and f.name != "files.json"])
 
 
 async def _modpack_model_to_dict(m: ModpackModel) -> dict:

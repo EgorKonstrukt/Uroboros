@@ -317,7 +317,7 @@ class MainWindow(QWidget):
                 should_cancel = lambda: self._cancel_requested
 
                 vm = VersionManager()
-                version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""))
+                version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""), self._update_progress, should_cancel)
                 if not vm.is_version_installed(version):
                     vm.download_version(version, self._update_progress, should_cancel)
 
@@ -397,6 +397,7 @@ class MainWindow(QWidget):
             "logging": "Downloading logging config...",
             "java": "Downloading Java runtime...",
             "java_extract": "Extracting Java runtime...",
+            "neoforge": "Installing NeoForge (patching client)...",
         }
         if phase in titles:
             self.status_label.setText(titles[phase])
@@ -412,6 +413,8 @@ class MainWindow(QWidget):
         elif phase == "asset":
             pct = int(files_done / files_total * 100) if files_total else 0
         elif phase == "java":
+            pct = int(current / total * 100) if total else 0
+        elif phase == "neoforge":
             pct = int(current / total * 100) if total else 0
         else:
             pct = 0
@@ -484,7 +487,7 @@ class MainWindow(QWidget):
                 should_cancel = lambda: self._cancel_requested
 
                 vm = VersionManager()
-                version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""))
+                version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""), self._update_progress, should_cancel)
                 if not vm.is_version_installed(version):
                     vm.download_version(version, self._update_progress, should_cancel)
                 if not vm.is_version_installed(version):
@@ -496,7 +499,8 @@ class MainWindow(QWidget):
 
                 java = m.get("java_path") or self.config.java_path
                 if not java or java.strip().lower() == "java":
-                    required = int((meta.java_version or {}).get("major") or 0) or 0
+                    jv = meta.java_version or {}
+                    required = int(jv.get("majorVersion") or jv.get("major") or 0) or 0
                     jm = JavaManager()
                     java = jm.find_java(required) if required else jm.find_java()
                     if not java and required:

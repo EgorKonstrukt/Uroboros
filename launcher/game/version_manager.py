@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
@@ -7,7 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from launcher.utils.storage import get_versions_dir, get_assets_dir, get_libraries_dir, get_log_config_path
+from launcher.utils.storage import (
+    get_versions_dir, get_assets_dir, get_libraries_dir, get_log_config_path, get_work_dir,
+)
 from launcher.utils.http import get_session
 from launcher.utils.progress import FileProgress, ParallelProgress, CancelledError
 from launcher.game.libraries_matcher import LibrariesMatcher, get_native_classifier_key
@@ -136,15 +139,56 @@ class VersionManager:
             merged = {
                 **parent,
                 **merged,
-                "libraries": parent.get("libraries", []) + merged.get("libraries", []),
+                "libraries": self._dedup_libraries(
+                    parent.get("libraries", []) + merged.get("libraries", [])
+                ),
+                "arguments": self._merge_arguments(
+                    parent.get("arguments"), merged.get("arguments")
+                ),
             }
             parent_id = parent.get("inheritsFrom", "")
         return merged
 
-    def install_loader(self, mc_version: str, loader: str, loader_version: str = "") -> str:
+    @staticmethod
+    def _dedup_libraries(libraries: list) -> list:
+        seen = set()
+        result = []
+        for lib in libraries:
+            dl = lib.get("downloads", {}) or {}
+            artifact = dl.get("artifact") or {}
+            key = artifact.get("path", "")
+            if not key:
+                for v in (dl.get("classifiers") or {}).values():
+                    if v.get("path"):
+                        key = v["path"]
+                        break
+            if not key:
+                key = lib.get("name", "")
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(lib)
+        return result
+
+    @staticmethod
+    def _merge_arguments(parent: dict, child: dict) -> dict:
+        parent = parent or {}
+        child = child or {}
+        merged = {}
+        for section in ("game", "jvm"):
+            merged[section] = list(parent.get(section, [])) + list(child.get(section, []))
+        return merged
+
+    def install_loader(self, mc_version: str, loader: str, loader_version: str = "",
+                       progress_callback=None, should_cancel=None) -> str:
         loader = (loader or "").strip().lower()
-        if loader not in ("fabric", "quilt"):
-            return mc_version
+        if loader in ("fabric", "quilt"):
+            return self._install_fabric_like(mc_version, loader, loader_version)
+        if loader == "neoforge":
+            return self._install_neoforge(mc_version, loader_version, progress_callback, should_cancel)
+        return mc_version
+
+    def _install_fabric_like(self, mc_version: str, loader: str, loader_version: str = "") -> str:
         try:
             base = (
                 "https://meta.fabricmc.net/v2/versions/loader"
@@ -171,6 +215,144 @@ class VersionManager:
             return vid
         except requests.RequestException:
             return mc_version
+
+    def _install_neoforge(self, mc_version: str, loader_version: str = "",
+                          progress_callback=None, should_cancel=None) -> str:
+        import shutil
+        import tempfile
+        import zipfile
+        tmp_dir = None
+        try:
+            if not loader_version:
+                resp = requests.get(
+                    "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                loader_version = self._latest_neoforge_version(resp.text)
+            installer_url = (
+                f"https://maven.neoforged.net/releases/net/neoforged/neoforge/"
+                f"{loader_version}/neoforge-{loader_version}-installer.jar"
+            )
+            resp = requests.get(installer_url, timeout=60)
+            resp.raise_for_status()
+            tmp_dir = Path(tempfile.mkdtemp(prefix="neoforge_"))
+            installer = tmp_dir / "installer.jar"
+            installer.write_bytes(resp.content)
+            with zipfile.ZipFile(installer) as zf:
+                names = zf.namelist()
+                entry = next((n for n in names if n.endswith("version.json")), None)
+                if not entry:
+                    return mc_version
+                profile = json.loads(zf.read(entry))
+                total_steps = 9
+                proc_entry = next((n for n in names if n.endswith("install_profile.json")), None)
+                if proc_entry:
+                    try:
+                        ip = json.loads(zf.read(proc_entry))
+                        if isinstance(ip.get("processors"), list) and ip["processors"]:
+                            total_steps = len(ip["processors"])
+                    except (json.JSONDecodeError, OSError):
+                        pass
+            vid = profile.get("id") or f"{mc_version}-neoforge-{loader_version}"
+            profile["id"] = vid
+            path = self.get_meta_path(vid)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+            if not self._neoforge_patch_ready(loader_version):
+                self._run_neoforge_installer(
+                    installer, profile, total_steps, progress_callback, should_cancel
+                )
+            return vid
+        except CancelledError:
+            raise
+        except (requests.RequestException, OSError, RuntimeError):
+            return mc_version
+        finally:
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _neoforge_patch_ready(loader_version: str) -> bool:
+        libs = get_libraries_dir()
+        nf_dir = libs / "net" / "neoforged" / "neoforge" / loader_version
+        if not ((nf_dir / f"neoforge-{loader_version}-universal.jar").exists()
+                and (nf_dir / f"neoforge-{loader_version}-client.jar").exists()):
+            return False
+        mc_root = libs / "net" / "minecraft" / "client"
+        if not mc_root.is_dir():
+            return False
+        return any(
+            (d / f"client-{d.name}-srg.jar").exists() and (d / f"client-{d.name}-extra.jar").exists()
+            for d in mc_root.iterdir() if d.is_dir()
+        )
+
+    def _run_neoforge_installer(self, installer_jar: Path, profile: dict, total_steps: int,
+                                progress_callback=None, should_cancel=None):
+        import subprocess
+        from launcher.game.java_manager import JavaManager
+        work_dir = get_work_dir()
+        work_dir.mkdir(parents=True, exist_ok=True)
+        profiles = work_dir / "launcher_profiles.json"
+        if not profiles.exists():
+            profiles.write_text(json.dumps({
+                "profiles": {},
+                "settings": {},
+                "version": 3,
+                "selectedProfile": "(Default)",
+                "clientToken": "",
+                "launcherVersion": {"name": "", "format": 0},
+            }, indent=2), encoding="utf-8")
+        required = int(profile.get("javaVersion", {}).get("majorVersion") or 0) or 17
+        manager = JavaManager()
+        java = manager.find_java(required) or manager.find_java(0)
+        if not java:
+            raise RuntimeError("Java not found to run the NeoForge installer")
+        if should_cancel and should_cancel():
+            raise CancelledError()
+        if progress_callback:
+            progress_callback({
+                "phase": "neoforge", "file": "processing", "current": 0, "total": total_steps,
+                "speed": 0, "files_done": 0, "files_total": total_steps,
+            })
+        cmd = [java, "-jar", str(installer_jar), "--installClient", str(work_dir)]
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        processed = 0
+        try:
+            for line in proc.stdout:
+                if "Processor:" in line and processed < total_steps:
+                    processed += 1
+                    if progress_callback:
+                        progress_callback({
+                            "phase": "neoforge", "file": "processing", "current": processed,
+                            "total": total_steps, "speed": 0,
+                            "files_done": processed, "files_total": total_steps,
+                        })
+                if should_cancel and should_cancel():
+                    proc.kill()
+                    raise CancelledError()
+        finally:
+            proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"NeoForge installer failed with exit code {proc.returncode}")
+        if progress_callback:
+            progress_callback({
+                "phase": "neoforge", "file": "processing", "current": total_steps,
+                "total": total_steps, "speed": 0,
+                "files_done": total_steps, "files_total": total_steps,
+            })
+
+    @staticmethod
+    def _latest_neoforge_version(metadata_xml: str) -> str:
+        import re
+        versions = re.findall(r"<version>([^<]+)</version>", metadata_xml or "")
+        if not versions:
+            return ""
+        return versions[-1]
 
     @staticmethod
     def _meta_from_dict(version_id: str, data: dict) -> VersionMeta:
@@ -203,7 +385,13 @@ class VersionManager:
         return [d.name for d in vdir.iterdir() if d.is_dir()]
 
     def is_version_installed(self, version_id: str) -> bool:
-        return self.get_jar_path(version_id).exists() and self.get_meta_path(version_id).exists()
+        if not self.get_meta_path(version_id).exists():
+            return False
+        meta = self.get_version_meta(version_id)
+        client_url = (meta.downloads.get("client") or {}).get("url", "")
+        if not client_url:
+            return True
+        return self.get_jar_path(version_id).exists()
 
     def download_version(self, version_id: str, progress_callback=None, should_cancel=None) -> bool:
         meta = self.get_version_meta(version_id)
