@@ -25,6 +25,7 @@ function switchTab(name) {
 
 function clearServerPolling() {
     if (serverPollTimer) { clearInterval(serverPollTimer); serverPollTimer = null; }
+    if (typeof stopOverview === 'function') stopOverview();
 }
 
 function selectServer(id) {

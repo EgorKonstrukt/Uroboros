@@ -17,9 +17,40 @@
             </div>
           </div>
           <div class="server-sub-nav">
-            <button class="sub-nav-item active" data-subtab="console" onclick="switchServerSubTab('console')">Console</button>
+            <button class="sub-nav-item active" data-subtab="overview" onclick="switchServerSubTab('overview')">Overview</button>
+            <button class="sub-nav-item" data-subtab="console" onclick="switchServerSubTab('console')">Console</button>
             <button class="sub-nav-item" data-subtab="settings" onclick="switchServerSubTab('settings')">Settings</button>
             <button class="sub-nav-item" data-subtab="files" onclick="switchServerSubTab('files')">Files</button>
+          </div>
+          <div id="serverOverviewView" class="server-sub-panel active">
+            <div class="overview-head">
+              <div>
+                <div class="overview-head-title">Server Overview</div>
+                <div class="overview-head-sub" id="ovLastUpdate">Waiting for data...</div>
+              </div>
+              <div class="overview-head-buttons">
+                <span class="overview-live" id="ovLiveDot">Live</span>
+                <button class="btn btn-secondary btn-sm" onclick="refreshOverview(true)">Refresh</button>
+              </div>
+            </div>
+            <div class="overview-tiles" id="overviewTiles"></div>
+            <div class="overview-grid">
+              <div class="md-card">
+                <div class="md-card-title">Memory <span class="overview-chart-sub" id="ovMemSub"></span></div>
+                <svg id="ovMemChart" class="overview-chart" viewBox="0 0 600 170" preserveAspectRatio="none"></svg>
+              </div>
+              <div class="md-card">
+                <div class="md-card-title">CPU <span class="overview-chart-sub" id="ovCpuSub"></span></div>
+                <svg id="ovCpuChart" class="overview-chart" viewBox="0 0 600 170" preserveAspectRatio="none"></svg>
+              </div>
+            </div>
+            <div class="overview-grid overview-grid-wide">
+              <div class="md-card">
+                <div class="md-card-title">Players online <span class="overview-chart-sub" id="ovPlayersSub"></span></div>
+                <svg id="ovPlayersChart" class="overview-chart" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
+              </div>
+            </div>
+            <div class="overview-details" id="overviewDetails"></div>
           </div>
           <div id="serverConsoleView" class="server-sub-panel active">
             <div class="console-wrap server-console-wrap">
@@ -44,12 +75,17 @@
             </div>
           </div>
           <div id="serverSettingsView" class="server-sub-panel">
+            <div class="panel-header">
+              <h3>Server Settings</h3>
+              <span class="panel-sub">Instance configuration</span>
+            </div>
             <form id="serverSettingsForm" onsubmit="saveServerSettings(event)"></form>
           </div>
           <div id="serverFilesView" class="server-sub-panel">
             <div class="file-toolbar" style="margin-top:0">
               <span id="serverFilesDir" class="dir-display" style="margin-bottom:0;flex:1;padding:6px 12px;font-size:12px"></span>
               <div class="upload-btn">
+                <button class="btn btn-start btn-sm" onclick="downloadServerPath(serverFilePath)">Download</button>
                 <button class="btn btn-start btn-sm">Upload File</button>
                 <input type="file" id="serverFilesUpload" onchange="uploadServerFile(this)" multiple>
               </div>

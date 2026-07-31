@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from dataclasses import fields, asdict
 from datetime import datetime
-from typing import get_type_hints
+from typing import get_type_hints, Optional
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request, File, Form, UploadFile
@@ -128,6 +128,22 @@ async def _get_modpack_options() -> list:
         return [{"value": "", "label": "(None)"}]
 
 
+_PLAYER_LINE_RE = re.compile(
+    r"There are (\d+) of a max of (\d+) players online", re.IGNORECASE
+)
+
+
+def _parse_players_from_output(mgr) -> Optional[dict]:
+    if mgr is None:
+        return None
+    lines = mgr.get_output(500)
+    for line in reversed(lines):
+        m = _PLAYER_LINE_RE.search(line)
+        if m:
+            return {"online": int(m.group(1)), "max": int(m.group(2))}
+    return None
+
+
 def _instance_to_api(inst: InstanceModel) -> dict:
     mgr = get_manager_sync(inst)
     running = mgr is not None and mgr.is_running()
@@ -145,6 +161,96 @@ def _instance_to_api(inst: InstanceModel) -> dict:
         except Exception:
             pass
     return result
+
+
+def _get_overview(inst: InstanceModel) -> dict:
+    import psutil
+    import platform
+
+    mgr = get_manager_sync(inst)
+    running = mgr is not None and mgr.is_running()
+
+    cfg = instance_model_to_dict(inst)
+    for key in ("created_at", "last_error"):
+        cfg.pop(key, None)
+
+    try:
+        refresh = int(ServerConfig.load().stats_refresh_seconds)
+    except Exception:
+        refresh = 2
+    refresh = max(1, min(60, refresh))
+
+    d = {
+        "running": running,
+        "last_error": mgr.last_error if mgr else None,
+        "players": _parse_players_from_output(mgr),
+        "log_lines": len(mgr.get_output(0)) if mgr else 0,
+        "last_output": (mgr.get_output(1)[-1] if mgr and mgr.get_output(1) else None),
+        "config": cfg,
+        "refresh_interval": refresh,
+        "system": {},
+        "process": None,
+    }
+
+    try:
+        vm = psutil.virtual_memory()
+        boot = psutil.boot_time()
+        d["system"] = {
+            "hostname": platform.node(),
+            "platform": platform.platform(),
+            "kernel": platform.version(),
+            "python": platform.python_version(),
+            "boot_time": boot,
+            "cpu_count": psutil.cpu_count(logical=True),
+            "cpu_physical": psutil.cpu_count(logical=False) or 0,
+            "cpu_percent": round(psutil.cpu_percent(interval=0.15), 1),
+            "memory_total_mb": round(vm.total / 1024 / 1024, 1),
+            "memory_used_mb": round(vm.used / 1024 / 1024, 1),
+            "memory_available_mb": round(vm.available / 1024 / 1024, 1),
+            "memory_percent": round(vm.percent, 1),
+        }
+        server_dir = inst.server_dir or str(Path.cwd())
+        du = psutil.disk_usage(server_dir)
+        d["system"]["disk_total_gb"] = round(du.total / 1e9, 2)
+        d["system"]["disk_used_gb"] = round(du.used / 1e9, 2)
+        d["system"]["disk_free_gb"] = round(du.free / 1e9, 2)
+    except Exception:
+        pass
+
+    if running and mgr and mgr.process:
+        try:
+            p = psutil.Process(mgr.process.pid)
+            with p.oneshot():
+                mem = p.memory_info()
+                cpu_times = p.cpu_times()
+                d["process"] = {
+                    "pid": p.pid,
+                    "status": p.status(),
+                    "create_time": p.create_time(),
+                    "uptime_seconds": int(time.time() - p.create_time()),
+                    "cpu_percent": round(p.cpu_percent(interval=0.15), 1),
+                    "cpu_time_user": round(cpu_times.user, 2),
+                    "cpu_time_system": round(cpu_times.system, 2),
+                    "memory_rss_mb": round(mem.rss / 1024 / 1024, 1),
+                    "memory_vms_mb": round(mem.vms / 1024 / 1024, 1),
+                    "memory_percent": round(p.memory_percent(), 2),
+                    "num_threads": p.num_threads(),
+                    "username": p.username(),
+                    "executable": p.exe(),
+                    "cwd": p.cwd(),
+                }
+                try:
+                    d["process"]["connections"] = len(p.connections())
+                except Exception:
+                    pass
+                try:
+                    d["process"]["open_files"] = len(p.open_files())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    return d
 
 
 # ── List instances ──
@@ -296,6 +402,14 @@ async def instance_status(instance_id: str):
     return _instance_to_api(inst)
 
 
+@router.get("/instances/{instance_id}/overview")
+async def instance_overview(instance_id: str):
+    inst = await get_instance(instance_id)
+    if inst is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    return _get_overview(inst)
+
+
 @router.post("/instances/{instance_id}/start")
 async def instance_start(instance_id: str):
     inst = await get_instance(instance_id)
@@ -421,6 +535,7 @@ _GLOBAL_FIELD_META = {
     "admin_password": {"label": "Admin Password", "description": "Password to protect this panel (auto-generated if empty)"},
     "log_level": {"label": "Log Level", "description": "Logging verbosity"},
     "curseforge_api_key": {"label": "CurseForge API Key", "description": "API key for CurseForge mod resolution (optional)"},
+    "stats_refresh_seconds": {"label": "Overview Refresh Rate", "description": "How often the server overview auto-refreshes (seconds, 1-60)"},
 }
 
 
@@ -599,6 +714,54 @@ async def upload_file(instance_id: str, file: UploadFile = File(...), path: str 
         file_path.write_bytes(content)
         return {"status": "uploaded", "path": str(file_path), "size": len(content)}
     except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@router.get("/instances/{instance_id}/files/download")
+async def download_file(instance_id: str, path: str = ""):
+    inst = await get_instance(instance_id)
+    if inst is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    base = Path(inst.server_dir).resolve()
+    target = (base / path).resolve()
+    if not str(target).startswith(str(base)):
+        return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
+    if not target.exists():
+        return JSONResponse(content={"error": "File or directory not found"}, status_code=404)
+
+    from starlette.responses import FileResponse
+
+    if target.is_file():
+        return FileResponse(target, filename=target.name)
+
+    # Directory -> build a ZIP archive on disk and stream it
+    import os
+    import tempfile
+    import zipfile
+
+    zip_name = (target.name if target != base else base.name) or "server"
+    fd, tmp_path = tempfile.mkstemp(prefix="uroboros_dl_", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(target):
+                for name in files:
+                    fpath = Path(root) / name
+                    arc = str(fpath.relative_to(base))
+                    try:
+                        zf.write(fpath, arc)
+                    except OSError:
+                        continue
+        return FileResponse(
+            tmp_path,
+            filename=zip_name + ".zip",
+            background=lambda: os.remove(tmp_path),
+        )
+    except Exception as e:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
@@ -898,10 +1061,43 @@ async def write_modpack_file(project_id: str, modpack_id: str, body: dict):
 @router.get("/projects/{project_id}/modpacks/{modpack_id}/files/download")
 async def download_modpack_file(project_id: str, modpack_id: str, path: str = ""):
     target = await _resolve_mp_path(project_id, modpack_id, path)
-    if target is None or not target.exists() or not target.is_file():
-        return JSONResponse(content={"error": "File not found"}, status_code=404)
+    if target is None or not target.exists():
+        return JSONResponse(content={"error": "File or directory not found"}, status_code=404)
     from starlette.responses import FileResponse
-    return FileResponse(target, filename=target.name)
+
+    if target.is_file():
+        return FileResponse(target, filename=target.name)
+
+    # Directory -> build a ZIP archive on disk and stream it
+    import os
+    import tempfile
+    import zipfile
+
+    mp_dir = _modpack_dir(project_id, modpack_id)
+    zip_name = (target.name if target != mp_dir else mp_dir.name) or "modpack"
+    fd, tmp_path = tempfile.mkstemp(prefix="uroboros_dl_", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(target):
+                for name in files:
+                    fpath = Path(root) / name
+                    arc = str(fpath.relative_to(mp_dir).as_posix())
+                    try:
+                        zf.write(fpath, arc)
+                    except OSError:
+                        continue
+        return FileResponse(
+            tmp_path,
+            filename=zip_name + ".zip",
+            background=lambda: os.remove(tmp_path),
+        )
+    except Exception as e:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 @router.post("/projects/{project_id}/modpacks/{modpack_id}/files/extract")

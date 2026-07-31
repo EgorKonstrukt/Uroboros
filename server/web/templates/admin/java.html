@@ -1,10 +1,16 @@
       <div id="javaPanel" class="panel">
+        <div class="panel-header">
+          <h3>Java Runtimes</h3>
+          <span class="panel-sub">Detected on this machine</span>
+        </div>
         <div class="row">
           <button class="btn btn-start" onclick="scanJava()">Scan Java</button>
           <span id="javaScanStatus" class="status-text"></span>
         </div>
-        <table>
-          <thead><tr><th>Major</th><th>Version</th><th>Vendor</th><th>Arch</th><th>Path</th></tr></thead>
-          <tbody id="javaBody"></tbody>
-        </table>
+        <div class="md-card" style="padding:0;overflow:hidden">
+          <table>
+            <thead><tr><th>Major</th><th>Version</th><th>Vendor</th><th>Arch</th><th>Path</th></tr></thead>
+            <tbody id="javaBody"></tbody>
+          </table>
+        </div>
       </div>

@@ -420,7 +420,9 @@ async function loadPdMpFiles(path) {
             var actions = '';
             if (!item.is_dir) {
                 actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openMpFileEditor(\'' + escAttr(childPath) + '\')">Edit</button>';
-                actions += '<a class="btn btn-sm btn-secondary" href="/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/download?path=' + encodeURIComponent(childPath) + '" style="text-decoration:none">Download</a>';
+                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();downloadMpPath(\'' + escAttr(childPath) + '\')">Download</button>';
+            } else {
+                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();downloadMpPath(\'' + escAttr(childPath) + '\')">Download ZIP</button>';
             }
             actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();deleteMpFile(\'' + escAttr(childPath) + '\')">Delete</button>';
             html += '<tr class="' + (item.is_dir ? 'file-dir' : 'file-file') + '" onclick="' + clickHandler + '"><td>' + label + ' ' + esc(item.name) + '</td><td>' + sizeStr + '</td><td>' + dateStr + '</td><td>' + actions + '</td></tr>';
@@ -474,6 +476,12 @@ async function deleteMpFile(filePath) {
         toast('Deleted', 'info');
         loadPdMpFiles(mpBrowsePath);
     } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function downloadMpPath(path) {
+    if (!pdProjectId || !pdMpDetailId) return;
+    var fallback = path ? path.split('/').pop() : pdMpDetailId + '-files';
+    await downloadBlob('/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/download?path=' + encodeURIComponent(path || ''), fallback);
 }
 
 async function uploadMpFile(input) {

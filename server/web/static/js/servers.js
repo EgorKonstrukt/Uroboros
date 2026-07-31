@@ -91,17 +91,18 @@ async function deleteServer(id) {
 
 async function openServerDetail(id) {
     currentServerId = id;
-    currentSubTab = 'console';
+    currentSubTab = 'overview';
+    stopOverview();
     document.getElementById('serverDetailView').style.display = 'block';
     document.getElementById('serverMiniBar').style.display = 'flex';
     document.getElementById('serverConsoleOutput').innerHTML = '';
     seenLines = {};
     document.querySelectorAll('.sub-nav-item').forEach(function (n) { n.classList.remove('active'); });
-    document.querySelector('.sub-nav-item[data-subtab="console"]').classList.add('active');
+    document.querySelector('.sub-nav-item[data-subtab="overview"]').classList.add('active');
     document.querySelectorAll('.server-sub-panel').forEach(function (p) { p.classList.remove('active'); });
-    document.getElementById('serverConsoleView').classList.add('active');
+    document.getElementById('serverOverviewView').classList.add('active');
     refreshServerStatus();
-    pollServerOutput();
+    startOverview();
 }
 
 function switchServerSubTab(tab) {
@@ -115,6 +116,8 @@ function switchServerSubTab(tab) {
     } else {
         if (serverPollTimer) { clearInterval(serverPollTimer); serverPollTimer = null; }
     }
+    if (tab === 'overview') { startOverview(); }
+    else { stopOverview(); }
     if (tab === 'settings') loadServerSettings();
     if (tab === 'files') loadServerFiles('');
 }
@@ -406,6 +409,7 @@ async function loadServerFiles(path) {
             var sizeStr = item.is_dir ? '-' : formatSize(item.size);
             var dateStr = new Date(item.modified * 1000).toLocaleString();
             var actions = '';
+            actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();downloadServerPath(\'' + escAttr(childPath) + '\')">' + (item.is_dir ? 'Download ZIP' : 'Download') + '</button>';
             if (!item.is_dir) {
                 actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openServerFileEditor(\'' + escAttr(childPath) + '\')">Edit</button>';
                 actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();deleteServerFile(\'' + escAttr(childPath) + '\')">Delete</button>';
@@ -463,6 +467,12 @@ async function deleteServerFile(filePath) {
         toast('File deleted', 'info');
         loadServerFiles(serverFilePath);
     } catch (e) { toast('Failed: ' + e.message, 'error'); }
+}
+
+async function downloadServerPath(path) {
+    if (!currentServerId) return;
+    var fallback = path ? path.split('/').pop() : currentServerId + '-files';
+    await downloadBlob('/admin/instances/' + currentServerId + '/files/download?path=' + encodeURIComponent(path || ''), fallback);
 }
 
 async function uploadServerFile(input) {

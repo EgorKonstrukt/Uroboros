@@ -11,10 +11,12 @@ function renderConfigForm(formId, fields, onSubmit) {
         label.className = 'config-label';
         label.textContent = f.label || f.key;
         group.appendChild(label);
-        var desc = document.createElement('div');
-        desc.className = 'config-desc';
-        desc.textContent = f.description || '';
-        group.appendChild(desc);
+        if (f.description) {
+            var desc = document.createElement('div');
+            desc.className = 'config-desc';
+            desc.textContent = f.description;
+            group.appendChild(desc);
+        }
         var input;
         if (f.type === 'password') {
             input = document.createElement('input');
@@ -28,10 +30,17 @@ function renderConfigForm(formId, fields, onSubmit) {
             input.type = 'checkbox';
             input.checked = f.value === true || f.value === 'true';
             input.dataset.type = 'bool';
-            var wrap = document.createElement('div');
-            wrap.className = 'config-check-wrap';
-            wrap.appendChild(input);
-            group.appendChild(wrap);
+            var sw = document.createElement('label');
+            sw.className = 'config-switch';
+            sw.appendChild(input);
+            var track = document.createElement('span');
+            track.className = 'config-switch-track';
+            var thumb = document.createElement('span');
+            thumb.className = 'config-switch-thumb';
+            track.appendChild(thumb);
+            sw.appendChild(track);
+            group.appendChild(sw);
+            group.classList.add('config-field-switch');
         } else if (f.options) {
             input = document.createElement('select');
             var hasMatch = false;
@@ -89,12 +98,11 @@ function renderConfigForm(formId, fields, onSubmit) {
         }
         input.name = f.key;
         input.className = 'config-input';
-        group.appendChild(input);
+        if (f.type !== 'bool') group.appendChild(input);
         form.appendChild(group);
     }
     var btnRow = document.createElement('div');
-    btnRow.className = 'row';
-    btnRow.style.marginTop = '16px';
+    btnRow.className = 'row config-actions';
     var saveBtn = document.createElement('button');
     saveBtn.type = 'submit';
     saveBtn.className = 'btn btn-start';

@@ -1,8 +1,11 @@
       <div id="playersPanel" class="panel">
+        <div class="panel-header">
+          <h3>Players</h3>
+          <span class="panel-sub" id="playersStatus" style="color:var(--text-hint)"></span>
+        </div>
         <div class="row" style="margin-bottom:12px">
           <button class="btn btn-start" onclick="loadPlayers()">Refresh</button>
-          <input id="playersSearch" placeholder="Search players..." style="width:240px;padding:8px 12px;border:2px solid #bdbdbd;border-radius:4px;font:14px sans-serif" oninput="renderPlayers()">
-          <span class="status-text" id="playersStatus"></span>
+          <input id="playersSearch" placeholder="Search players..." oninput="renderPlayers()">
         </div>
         <div style="overflow-x:auto">
           <table>

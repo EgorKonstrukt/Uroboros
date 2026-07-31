@@ -20,6 +20,7 @@ class ServerConfig:
     curseforge_api_key: str = ""
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    stats_refresh_seconds: int = 2
 
     def save(self):
         SERVER_DIR.mkdir(parents=True, exist_ok=True)
