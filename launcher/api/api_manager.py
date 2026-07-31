@@ -8,14 +8,16 @@ REQUEST_TIMEOUT = 10
 
 
 class APIManager:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, verify_ssl: bool = True):
         self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
 
     def _get(self, endpoint: str, params: dict = None) -> Any:
         resp = requests.get(
             f"{self.base_url}/{endpoint}",
             params=params,
             timeout=REQUEST_TIMEOUT,
+            verify=self.verify_ssl,
         )
         resp.raise_for_status()
         return resp.json()
@@ -25,6 +27,7 @@ class APIManager:
             f"{self.base_url}/{endpoint}",
             json=data or {},
             timeout=REQUEST_TIMEOUT,
+            verify=self.verify_ssl,
         )
         resp.raise_for_status()
         return resp.json()
@@ -38,7 +41,7 @@ class APIManager:
 
     def download_modpack_file(self, project_id: str, modpack_id: str, filename: str, dest: Path):
         url = f"{self.base_url}/launcher/projects/{project_id}/modpacks/{modpack_id}/download/{filename}"
-        resp = requests.get(url, timeout=REQUEST_TIMEOUT * 6, stream=True)
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT * 6, stream=True, verify=self.verify_ssl)
         resp.raise_for_status()
         dest.parent.mkdir(parents=True, exist_ok=True)
         with open(dest, "wb") as f:

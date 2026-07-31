@@ -1,4 +1,5 @@
-import traceback
+import base64
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -13,21 +14,63 @@ from .schemas import (
     AuthRequest, RegisterRequest, TokenRequest, RefreshRequest,
     JoinRequest, SignoutRequest,
 )
-from .crypto import hash_password, check_password, new_uuid, new_token
+from .crypto import hash_password, check_password, hash_token, new_uuid, new_token
+from .ratelimit import auth_limiter
 
 router = APIRouter()
+
+ACCESS_TOKEN_TTL = timedelta(hours=24)
+SERVER_SESSION_TTL = timedelta(seconds=30)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _error(message: str, code: int = 403) -> JSONResponse:
+    return JSONResponse(
+        status_code=code,
+        content={"error": "ForbiddenOperationException", "errorMessage": message},
+    )
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("X-Forwarded-For")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    if request.client:
+        return request.client.host or ""
+    return ""
+
+
+def _check_rate(request: Request) -> Optional[JSONResponse]:
+    if not auth_limiter.allow(_client_ip(request)):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "TooManyRequests", "errorMessage": "Too many requests, try again later"},
+        )
+    return None
 
 
 async def _get_user_by_username(session: AsyncSession, username: str) -> Optional[UserModel]:
     stmt = select(UserModel).where(
-        or_(UserModel.username == username, UserModel.display_name == username)
+        or_(
+            UserModel.username == username,
+            UserModel.display_name == username,
+            UserModel.email == username,
+        )
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
 
 async def _get_user_by_token(session: AsyncSession, token: str) -> Optional[UserModel]:
-    stmt = select(UserModel).where(UserModel.access_token == token)
+    if not token:
+        return None
+    stmt = select(UserModel).where(
+        UserModel.access_token_hash == hash_token(token),
+        UserModel.token_expires_at > _now(),
+    )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -38,191 +81,197 @@ async def _get_user_by_uuid(session: AsyncSession, uid: str) -> Optional[UserMod
     return result.scalar_one_or_none()
 
 
-async def _user_to_profile(user: UserModel) -> dict:
+def _properties_to_list(properties: dict) -> list:
+    if not properties:
+        return []
+    if isinstance(properties, list):
+        return properties
+    out = []
+    for name, value in properties.items():
+        encoded = base64.b64encode(str(value).encode("utf-8")).decode("ascii")
+        out.append({"name": str(name), "value": encoded})
+    return out
+
+
+def _issue_token(user: UserModel, client_token: str) -> str:
+    token = new_token()
+    user.access_token_hash = hash_token(token)
+    user.client_token_hash = hash_token(client_token) if client_token else ""
+    user.token_expires_at = _now() + ACCESS_TOKEN_TTL
+    return token
+
+
+def _user_to_profile(user: UserModel) -> dict:
     return {"id": user.uuid, "name": user.display_name}
 
 
-async def _user_to_auth_response(user: UserModel, client_token: str) -> dict:
-    profiles = [await _user_to_profile(user)]
-    return {
-        "accessToken": user.access_token,
+def _user_to_auth_response(user: UserModel, access_token: str, client_token: str, request_user: bool) -> dict:
+    profiles = [_user_to_profile(user)]
+    resp = {
+        "accessToken": access_token,
         "clientToken": client_token,
         "availableProfiles": profiles,
         "selectedProfile": profiles[0],
     }
+    if request_user:
+        resp["user"] = {
+            "id": user.uuid,
+            "properties": _properties_to_list(user.properties),
+        }
+    return resp
 
 
 @router.post("/authenticate")
-async def authenticate(body: AuthRequest):
+async def authenticate(request: Request, body: AuthRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
     async with get_session() as session:
         user = await _get_user_by_username(session, body.username)
-
-        if not user:
-            for key in (body.username, body.username.split("@")[0]):
-                stmt = select(UserModel).where(UserModel.username == key)
-                result = await session.execute(stmt)
-                user = result.scalar_one_or_none()
-                if user and check_password(body.password, user.password_hash):
-                    break
-                user = None
-            if not user:
-                user = UserModel(
-                    uuid=new_uuid(),
-                    username=body.username if "@" in body.username else f"{body.username}@yggdrasil",
-                    display_name=body.username,
-                    email="",
-                    password_hash=hash_password(body.password),
-                    access_token=new_token(),
-                    client_token=body.clientToken or new_token(),
-                )
-                session.add(user)
-                await session.commit()
-                await session.refresh(user)
-
-        if not check_password(body.password, user.password_hash):
-            return JSONResponse(
-                status_code=403,
-                content={"error": "ForbiddenOperationException", "errorMessage": "Invalid credentials"},
-            )
+        if not user or not check_password(body.password, user.password_hash):
+            return _error("Invalid credentials")
 
         client_token = body.clientToken or new_token()
-        user.access_token = new_token()
-        user.client_token = client_token
+        access_token = _issue_token(user, client_token)
         await session.commit()
-
-        resp = await _user_to_auth_response(user, client_token)
-        if body.requestUser:
-            resp["user"] = {"id": user.uuid, "properties": user.properties if user.properties else {}}
-        return resp
+        return _user_to_auth_response(user, access_token, client_token, body.requestUser)
 
 
 @router.post("/register")
-async def register(body: RegisterRequest):
-    try:
-        if not body.username or not body.password:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "ForbiddenOperationException", "errorMessage": "Username and password required"},
-            )
-        if len(body.password) < 4:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "ForbiddenOperationException", "errorMessage": "Password too short (min 4 characters)"},
-            )
+async def register(request: Request, body: RegisterRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
+    username = (body.username or "").strip()
+    password = body.password or ""
+    if not username:
+        return _error("Username is required", 400)
+    if len(username) > 255:
+        return _error("Username too long (max 255 characters)", 400)
+    if len(password) < 8:
+        return _error("Password too short (min 8 characters)", 400)
+    if len(password) > 1024:
+        return _error("Password too long (max 1024 characters)", 400)
 
-        async with get_session() as session:
-            existing = await _get_user_by_username(session, body.username)
-            if existing:
-                return JSONResponse(
-                    status_code=409,
-                    content={"error": "ForbiddenOperationException", "errorMessage": "Account already exists"},
-                )
+    async with get_session() as session:
+        existing = await _get_user_by_username(session, username)
+        if existing:
+            return _error("Account already exists", 409)
 
-            uid = new_uuid()
-            at = new_token()
-            ct = new_token()
-            email_username = body.email or (
-                f"{body.username}@yggdrasil" if "@" not in body.username else body.username
-            )
-
-            user = UserModel(
-                uuid=uid,
-                username=email_username,
-                display_name=body.username,
-                email=body.email,
-                password_hash=hash_password(body.password),
-                access_token=at,
-                client_token=ct,
-            )
-            session.add(user)
-            await session.commit()
-            await session.refresh(user)
-
-            resp = await _user_to_auth_response(user, ct)
-            return JSONResponse(resp, status_code=201)
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f"[Register Error] {e}\n{tb}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "InternalServerError", "errorMessage": str(e), "detail": tb},
+        uid = new_uuid()
+        client_token = new_token()
+        email_username = body.email or (
+            f"{username}@yggdrasil" if "@" not in username else username
         )
+
+        user = UserModel(
+            uuid=uid,
+            username=email_username,
+            display_name=username,
+            email=body.email or "",
+            password_hash=hash_password(password),
+            properties={},
+        )
+        session.add(user)
+        await session.flush()
+        access_token = _issue_token(user, client_token)
+        await session.commit()
+
+        resp = _user_to_auth_response(user, access_token, client_token, False)
+        return JSONResponse(resp, status_code=201)
 
 
 @router.post("/refresh")
-async def refresh(body: RefreshRequest):
+async def refresh(request: Request, body: RefreshRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
     async with get_session() as session:
         user = await _get_user_by_token(session, body.accessToken)
         if not user:
-            return JSONResponse(
-                status_code=403,
-                content={"error": "ForbiddenOperationException", "errorMessage": "Invalid token"},
-            )
+            return _error("Invalid token")
+        if body.clientToken and not (
+            user.client_token_hash and hash_token(body.clientToken) == user.client_token_hash
+        ):
+            return _error("Invalid clientToken")
 
-        client_token = body.clientToken or new_token()
-        user.access_token = new_token()
-        user.client_token = client_token
+        client_token = body.clientToken if body.clientToken else new_token()
+        access_token = _issue_token(user, client_token)
         await session.commit()
-
-        resp = await _user_to_auth_response(user, client_token)
-        if body.requestUser:
-            resp["user"] = {"id": user.uuid, "properties": user.properties if user.properties else {}}
-        return resp
+        return _user_to_auth_response(user, access_token, client_token, body.requestUser)
 
 
 @router.post("/validate")
-async def validate(body: TokenRequest):
+async def validate(request: Request, body: TokenRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
     async with get_session() as session:
         user = await _get_user_by_token(session, body.accessToken)
-        if user:
-            return {}
-        return JSONResponse(
-            status_code=403,
-            content={"error": "ForbiddenOperationException", "errorMessage": "Invalid token"},
-        )
+        if not user:
+            return _error("Invalid token")
+        if body.clientToken and not (
+            user.client_token_hash and hash_token(body.clientToken) == user.client_token_hash
+        ):
+            return _error("Invalid clientToken")
+        return {}
 
 
 @router.post("/invalidate")
-async def invalidate(body: TokenRequest):
+async def invalidate(request: Request, body: TokenRequest):
     async with get_session() as session:
         user = await _get_user_by_token(session, body.accessToken)
         if user:
-            user.access_token = ""
+            if body.clientToken and user.client_token_hash and (
+                hash_token(body.clientToken) != user.client_token_hash
+            ):
+                return _error("Invalid clientToken")
+            user.access_token_hash = ""
+            user.client_token_hash = ""
+            user.token_expires_at = None
             await session.commit()
     return {}
 
 
 @router.post("/signout")
-async def signout(body: SignoutRequest):
+async def signout(request: Request, body: SignoutRequest):
     async with get_session() as session:
         user = await _get_user_by_username(session, body.username)
-        if user:
-            user.access_token = ""
+        if user and check_password(body.password, user.password_hash):
+            user.access_token_hash = ""
+            user.client_token_hash = ""
+            user.token_expires_at = None
             await session.commit()
     return {}
 
 
 @router.post("/join")
-async def join_server(body: JoinRequest):
+async def join_server(request: Request, body: JoinRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
     async with get_session() as session:
         user = await _get_user_by_token(session, body.accessToken)
-        if user and user.uuid == body.selectedProfile.replace("-", ""):
-            stmt = select(ServerSessionModel).where(
-                ServerSessionModel.display_name == user.display_name
-            )
-            result = await session.execute(stmt)
-            ss = result.scalar_one_or_none()
-            if not ss:
-                ss = ServerSessionModel(display_name=user.display_name, server_id=body.serverId)
-                session.add(ss)
-            else:
-                ss.server_id = body.serverId
-            await session.commit()
-            return {}
-        return JSONResponse(
-            status_code=403,
-            content={"error": "ForbiddenOperationException", "errorMessage": "Invalid token or profile"},
+        if not user or user.uuid != body.selectedProfile.replace("-", ""):
+            return _error("Invalid token or profile")
+
+        stmt = select(ServerSessionModel).where(
+            ServerSessionModel.display_name == user.display_name
         )
+        result = await session.execute(stmt)
+        ss = result.scalar_one_or_none()
+        if not ss:
+            ss = ServerSessionModel(
+                display_name=user.display_name,
+                server_id=body.serverId,
+                expires_at=_now() + SERVER_SESSION_TTL,
+            )
+            session.add(ss)
+        else:
+            ss.server_id = body.serverId
+            ss.expires_at = _now() + SERVER_SESSION_TTL
+        await session.commit()
+        return {}
 
 
 @router.get("/hasJoined")
@@ -235,6 +284,7 @@ async def has_joined(request: Request):
         stmt = select(ServerSessionModel).where(
             ServerSessionModel.display_name == username,
             ServerSessionModel.server_id == server_id,
+            ServerSessionModel.expires_at > _now(),
         )
         result = await session.execute(stmt)
         ss = result.scalar_one_or_none()
@@ -247,13 +297,10 @@ async def has_joined(request: Request):
                 return {
                     "id": user.uuid,
                     "name": user.display_name,
-                    "properties": user.properties if user.properties else [],
+                    "properties": _properties_to_list(user.properties),
                 }
 
-        return JSONResponse(
-            status_code=403,
-            content={"error": "ForbiddenOperationException", "errorMessage": "Failed to verify"},
-        )
+        return _error("Failed to verify")
 
 
 @router.get("/profile/{profile_id}")
@@ -265,12 +312,9 @@ async def get_profile(profile_id: str):
             return {
                 "id": user.uuid,
                 "name": user.display_name,
-                "properties": user.properties if user.properties else [],
+                "properties": _properties_to_list(user.properties),
             }
-        return JSONResponse(
-            status_code=404,
-            content={"error": "ForbiddenOperationException", "errorMessage": "Profile not found"},
-        )
+        return _error("Profile not found", 404)
 
 
 @router.get("/admin/users")
@@ -286,9 +330,6 @@ async def admin_list_users():
                 "username": u.username,
                 "display_name": u.display_name,
                 "email": u.email,
-                "password_hash": u.password_hash[:12] + "...",
-                "access_token": u.access_token[:12] + "..." if u.access_token else "",
-                "client_token": u.client_token[:12] + "..." if u.client_token else "",
                 "created_at": str(u.created_at),
             }
             for u in users
@@ -306,6 +347,8 @@ async def admin_list_sessions():
                 "id": s.id,
                 "display_name": s.display_name,
                 "server_id": s.server_id,
+                "expires_at": str(s.expires_at) if s.expires_at else None,
+                "created_at": str(s.created_at),
             }
             for s in sessions
         ]

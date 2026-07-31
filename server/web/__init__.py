@@ -1,6 +1,8 @@
 import json
+import asyncio
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, FileResponse
@@ -8,7 +10,8 @@ from sqlalchemy import select
 
 from server.config import SERVER_DIR
 from server.database import get_session, init_db
-from server.models import ProjectModel, ProjectNewsModel, ModpackModel
+from server.models import ProjectModel, ProjectNewsModel, ModpackModel, InstanceModel
+from server.mc.status import probe
 
 
 projects_router = APIRouter()
@@ -209,6 +212,81 @@ async def delete_news(project_id: str, news_id: int):
 
 
 # ── Launcher Sync ──
+
+def _server_address(inst: InstanceModel) -> tuple:
+    host = "127.0.0.1"
+    port = 25565
+    props = {}
+    props_path = Path(inst.server_dir) / "server.properties"
+    if props_path.exists():
+        for line in props_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                props[key.strip()] = val.strip()
+    try:
+        port = int(props.get("server-port", "25565"))
+    except ValueError:
+        pass
+    ip = props.get("server-ip", "").strip()
+    if ip:
+        host = ip
+    else:
+        parsed = urlparse(inst.api_url)
+        if parsed.hostname:
+            host = parsed.hostname
+    return host, port
+
+
+@launcher_router.get("/projects/{project_id}/servers")
+async def launcher_project_servers(project_id: str):
+    from server.mc.registry import get_manager_sync
+    from server.mc.pidfile import is_running as pid_running
+
+    async with get_session() as session:
+        stmt = select(InstanceModel).where(InstanceModel.project_id == project_id)
+        result = await session.execute(stmt)
+        instances = result.scalars().all()
+        mstmt = select(ModpackModel).where(ModpackModel.project_id == project_id)
+        mres = await session.execute(mstmt)
+        modpacks = {m.id: m.name for m in mres.scalars().all()}
+
+    entries = []
+    tasks = []
+    for inst in instances:
+        if not inst.enabled:
+            continue
+        host, port = _server_address(inst)
+        mgr = get_manager_sync(inst)
+        running = mgr.is_running() or pid_running(inst.id)
+        entries.append((inst, host, port, running))
+        if running:
+            tasks.append(asyncio.to_thread(probe, host, port, 2.0))
+        else:
+            tasks.append(asyncio.to_thread(_offline_status))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+    servers = []
+    for (inst, host, port, running), status in zip(entries, results):
+        if isinstance(status, Exception):
+            status = {"online": False}
+        servers.append({
+            "id": inst.id,
+            "name": inst.name,
+            "version": inst.version or "",
+            "modpack_id": inst.modpack_id or "",
+            "modpack_name": modpacks.get(inst.modpack_id, ""),
+            "running": running,
+            "address": host,
+            "port": port,
+            **status,
+        })
+    return {"items": servers}
+
+
+def _offline_status() -> dict:
+    return {"online": False}
+
 
 @launcher_router.get("/sync/{project_id}")
 async def launcher_sync_project(project_id: str):

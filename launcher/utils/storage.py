@@ -45,6 +45,14 @@ def get_java_dir() -> Path:
     return get_work_dir() / "runtime"
 
 
+def get_log_config_dir() -> Path:
+    return get_work_dir() / "log_configs"
+
+
+def get_log_config_path(version_id: str) -> Path:
+    return get_log_config_dir() / f"{version_id}.xml"
+
+
 def get_logs_dir() -> Path:
     return get_launcher_dir() / "logs"
 
@@ -52,5 +60,5 @@ def get_logs_dir() -> Path:
 def ensure_dirs():
     for d in [get_launcher_dir(), get_work_dir(), get_versions_dir(),
               get_assets_dir(), get_libraries_dir(), get_java_dir(),
-              get_logs_dir(), get_projects_dir()]:
+              get_logs_dir(), get_projects_dir(), get_log_config_dir()]:
         d.mkdir(parents=True, exist_ok=True)

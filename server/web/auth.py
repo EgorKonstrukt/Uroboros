@@ -5,8 +5,6 @@ from datetime import timedelta
 from fastapi import HTTPException, Request
 from starlette.status import HTTP_401_UNAUTHORIZED
 
-from server.config import ServerConfig
-
 _tokens: dict[str, float] = {}
 TOKEN_EXPIRY = timedelta(hours=24).total_seconds()
 
@@ -41,9 +39,6 @@ async def require_admin(request: Request):
     if path in EXACT_PUBLIC:
         return True
     if any(path.startswith(p) for p in PUBLIC_PREFIXES):
-        return True
-    cfg = ServerConfig.load()
-    if not cfg.admin_password:
         return True
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):

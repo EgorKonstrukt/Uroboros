@@ -5,6 +5,7 @@ import typing
 import json
 import shutil
 import hashlib
+import hmac
 import asyncio
 import uuid
 from dataclasses import fields, asdict
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from server.config import ServerConfig, SERVER_DIR
 from server.web.auth import require_admin, create_token, delete_token
+from server.auth.ratelimit import login_limiter
 from server.models import InstanceModel, ModpackModel
 from server.database import get_session
 from sqlalchemy import select
@@ -383,7 +385,7 @@ _GLOBAL_FIELD_META = {
     "host": {"label": "Bind Host", "description": "IP address for the HTTP server"},
     "port": {"label": "Port", "description": "HTTP server port"},
     "db_path": {"label": "Database Path", "description": "SQLite database file location"},
-    "admin_password": {"label": "Admin Password", "description": "Password to protect this panel (empty = no auth)"},
+    "admin_password": {"label": "Admin Password", "description": "Password to protect this panel (auto-generated if empty)"},
     "log_level": {"label": "Log Level", "description": "Logging verbosity"},
     "curseforge_api_key": {"label": "CurseForge API Key", "description": "API key for CurseForge mod resolution (optional)"},
 }
@@ -1088,12 +1090,15 @@ async def login_page(request: Request):
 
 
 @router.post("/login")
-async def login(body: dict):
+async def login(request: Request, body: dict):
     cfg = ServerConfig.load()
     if not cfg.admin_password:
         return JSONResponse(content={"error": "Auth is disabled"}, status_code=400)
+    ip = request.client.host if request.client else ""
+    if not login_limiter.allow(ip):
+        return JSONResponse(content={"error": "Too many attempts, try again later"}, status_code=429)
     password = body.get("password", "")
-    if password != cfg.admin_password:
+    if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
         return JSONResponse(content={"error": "Invalid password"}, status_code=401)
     token = create_token()
     return {"token": token}

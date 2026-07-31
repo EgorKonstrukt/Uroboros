@@ -72,3 +72,21 @@ class LibrariesMatcher:
                 artifact = dl.get("artifact", {})
                 result.append(artifact)
         return result
+
+
+def get_native_classifier_key(classifiers: dict) -> str:
+    os_name = LibrariesMatcher.get_current_os()
+    arch = LibrariesMatcher.get_current_arch()
+    if os_name == "windows":
+        candidates = ["natives-windows-arm64"] if arch == "arm64" else []
+        candidates += ["natives-windows", "natives-windows-64", "natives-windows-x86_64"]
+    elif os_name == "osx":
+        candidates = ["natives-osx-arm64"] if arch == "arm64" else []
+        candidates += ["natives-osx", "natives-osx-x86_64"]
+    else:
+        candidates = ["natives-linux-arm64"] if arch == "arm64" else []
+        candidates += ["natives-linux", "natives-linux-x86_64"]
+    for key in candidates:
+        if key in classifiers:
+            return key
+    return ""

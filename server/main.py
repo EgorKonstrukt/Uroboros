@@ -31,6 +31,8 @@ def cmd_run(args):
             port=args.port or cfg.port,
             log_level=args.log_level or cfg.log_level,
             loop="asyncio",
+            ssl_certfile=cfg.ssl_certfile or None,
+            ssl_keyfile=cfg.ssl_keyfile or None,
         )
         server = uvicorn.Server(uvicorn_config)
         loop.run_until_complete(server.serve())

@@ -1,8 +1,9 @@
-import os
+import re
 import sys
 import zipfile
 import tarfile
 import shutil
+import subprocess
 import platform as plat
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,8 @@ from typing import Optional
 import requests
 
 from launcher.utils.storage import get_java_dir
+from launcher.utils.http import get_session
+from launcher.utils.progress import FileProgress, CancelledError
 
 
 ADOPTIUM_API = "https://api.adoptium.net/v3/assets/latest/{version}/hotspot"
@@ -47,14 +50,8 @@ class JavaManager:
 
     def find_java(self, version: int = 17) -> Optional[str]:
         system_java = shutil.which("java")
-        if system_java:
-            try:
-                import subprocess
-                out = subprocess.check_output([system_java, "-version"], stderr=subprocess.STDOUT, timeout=10).decode()
-                if f"version {version}" in out or f"version 1.{version}" in out:
-                    return system_java
-            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
-                pass
+        if system_java and self.matches_version(system_java, version):
+            return system_java
         java_dir = get_java_dir()
         if java_dir.exists():
             if sys.platform == "win32":
@@ -62,11 +59,29 @@ class JavaManager:
             else:
                 javas = list(java_dir.rglob("java"))
             for j in javas:
-                if j.is_file():
+                if j.is_file() and self.matches_version(str(j), version):
                     return str(j)
-        return system_java or "java"
+        return None
 
-    def download_java(self, java_version: int = 17, progress_callback=None) -> Optional[str]:
+    @staticmethod
+    def matches_version(java_path: str, version: int) -> bool:
+        try:
+            out = subprocess.check_output(
+                [java_path, "-version"], stderr=subprocess.STDOUT, timeout=10
+            ).decode(errors="replace")
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, OSError):
+            return False
+        if not version:
+            return True
+        if f'version "1.{version}' in out:
+            return True
+        if re.search(rf'version "{version}(\.|_)', out):
+            return True
+        return False
+
+    def download_java(self, java_version: int = 17, progress_callback=None, should_cancel=None) -> Optional[str]:
+        if should_cancel and should_cancel():
+            raise CancelledError()
         assets = self.get_available_versions(java_version)
         if not assets:
             return None
@@ -97,19 +112,36 @@ class JavaManager:
         ext = ".zip" if sys.platform == "win32" else ".tar.gz"
         java_archive = get_java_dir() / f"java{java_version}{ext}"
 
-        resp = requests.get(dl_url, timeout=300, stream=True)
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        downloaded = 0
-        with open(java_archive, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
+        progress = FileProgress(progress_callback, "java", java_archive.name)
+        tmp = java_archive.with_name(java_archive.name + ".part")
+        try:
+            resp = get_session().get(dl_url, timeout=300, stream=True)
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            with open(tmp, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=262144):
+                    if not chunk:
+                        continue
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if progress_callback and total:
-                        progress_callback(int(downloaded / total * 100))
+                    progress.update(downloaded, total)
+                    if should_cancel and should_cancel():
+                        raise CancelledError()
+            tmp.replace(java_archive)
+            progress.done()
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+
         if progress_callback:
-            progress_callback(100)
+            progress_callback({
+                "phase": "java_extract", "file": "Extracting...",
+                "current": 0, "total": 0, "speed": 0, "files_done": 0, "files_total": 0,
+            })
 
         extract_dir = get_java_dir() / f"jdk-{java_version}"
         if extract_dir.exists():

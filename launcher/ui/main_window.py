@@ -2,27 +2,36 @@ import hashlib
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QPushButton, QProgressBar,
+    QPushButton, QProgressBar, QMenu,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 
 from launcher.api.api_manager import APIManager
+from launcher.api.auth import YggdrasilSession, YggdrasilAuth
 from launcher.config import LauncherConfig, cache_projects, load_cached_projects
 from launcher.ui.settings_dialog import SettingsDialog
+from launcher.ui.login_dialog import LoginDialog
 from launcher.game.starter import GameStarter
 from launcher.game.version_manager import VersionManager
 from launcher.game.assets import AssetManager
+from launcher.game.java_manager import JavaManager
 from launcher.ui.widgets.console import ConsoleWidget
 from launcher.ui.widgets.modpack_card import ModpackCard
 from launcher.utils.storage import get_modpack_dir
 from launcher.utils.async_worker import run_async
+from launcher.utils.progress import CancelledError
+
+
+class _GameSignals(QObject):
+    exited = pyqtSignal()
+    progress = pyqtSignal(object)
 
 
 class MainWindow(QWidget):
     def __init__(self, config: LauncherConfig, parent=None):
         super().__init__(parent)
         self.config = config
-        self.api = APIManager(config.api_url)
+        self.api = APIManager(config.api_url, verify_ssl=config.verify_ssl)
         self.project = None
         self.modpacks = []
         self.modpack_cards = []
@@ -32,6 +41,9 @@ class MainWindow(QWidget):
         self.version_manager = VersionManager()
 
         self._setup_ui()
+        self._game_signals = _GameSignals()
+        self._game_signals.exited.connect(self._on_game_exited)
+        self._game_signals.progress.connect(self._apply_progress)
         self._load_project()
 
     def _setup_ui(self):
@@ -47,6 +59,14 @@ class MainWindow(QWidget):
         self.title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #cdd6f4;")
         header.addWidget(self.title_label)
         header.addStretch()
+        self.account_btn = QPushButton("Login", self)
+        self.account_btn.setStyleSheet("""
+            QPushButton { background: #313244; color: #a6e3a1; border: none;
+                border-radius: 6px; padding: 8px 18px; font-size: 13px; }
+            QPushButton:hover { background: #45475a; }
+        """)
+        self.account_btn.clicked.connect(self._on_account_clicked)
+        header.addWidget(self.account_btn)
         self.settings_btn = QPushButton("Settings", self)
         self.settings_btn.setStyleSheet("""
             QPushButton { background: #313244; color: #cdd6f4; border: none;
@@ -121,6 +141,11 @@ class MainWindow(QWidget):
         self.cancel_btn.clicked.connect(self._cancel_install)
         progress_row.addWidget(self.cancel_btn)
         ps_layout.addLayout(progress_row)
+
+        self.detail_label = QLabel("", self.project_section)
+        self.detail_label.setStyleSheet("color: #a6adc8; font-size: 12px; font-family: 'Consolas', 'Courier New', monospace;")
+        self.detail_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        ps_layout.addWidget(self.detail_label)
 
         self.content_layout.addWidget(self.project_section)
         scroll.setWidget(content)
@@ -238,22 +263,24 @@ class MainWindow(QWidget):
         self.progress_bar.setValue(0)
 
         def do_install():
-            if self._cancel_requested:
-                return "cancelled"
-
-            vm = VersionManager()
-            if not vm.is_version_installed(version):
-                vm.download_version(version, self._update_progress)
-
-            meta = vm.get_version_meta(version)
-            if meta and meta.assets:
-                am = AssetManager()
-                am.download_assets(meta.assets, self._update_progress)
-
-            mp_dir = get_modpack_dir(self.project["id"], m["id"])
-            mp_dir.mkdir(parents=True, exist_ok=True)
-
             try:
+                if self._cancel_requested:
+                    return "cancelled"
+                should_cancel = lambda: self._cancel_requested
+
+                vm = VersionManager()
+                version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""))
+                if not vm.is_version_installed(version):
+                    vm.download_version(version, self._update_progress, should_cancel)
+
+                meta = vm.get_version_meta(version)
+                if meta and meta.assets:
+                    am = AssetManager()
+                    am.download_assets(meta.assets, self._update_progress, should_cancel)
+
+                mp_dir = get_modpack_dir(self.project["id"], m["id"])
+                mp_dir.mkdir(parents=True, exist_ok=True)
+
                 files = self.api.get_modpack_files(self.project["id"], m["id"])
                 total = len(files)
                 for i, f in enumerate(files):
@@ -274,14 +301,16 @@ class MainWindow(QWidget):
                         if actual != expected_hash:
                             raise IOError(f"Hash mismatch for {f['name']}")
                     self._update_progress(int((i + 1) / total * 100) if total > 0 else 100)
-            except Exception as e:
-                self.status_label.setText(f"Download error: {e}")
+                return True
+            except CancelledError:
+                return "cancelled"
+            except Exception:
                 return False
-            return True
 
         def on_done(result):
             self.progress_bar.setVisible(False)
             self.cancel_btn.setVisible(False)
+            self.detail_label.setText("")
             if result == "cancelled":
                 self.status_label.setText("Installation cancelled")
             elif result:
@@ -293,80 +322,312 @@ class MainWindow(QWidget):
         def on_error(err):
             self.progress_bar.setVisible(False)
             self.cancel_btn.setVisible(False)
+            self.detail_label.setText("")
             self.status_label.setText(f"Install failed: {err}")
 
         run_async(do_install, on_done=on_done, on_error=on_error)
 
-    def _update_progress(self, value):
-        self.progress_bar.setValue(value)
+    def _update_progress(self, info):
+        self._game_signals.progress.emit(info)
+
+    def _apply_progress(self, info):
+        if not isinstance(info, dict):
+            self.progress_bar.setValue(int(info or 0))
+            return
+        phase = info.get("phase", "")
+        current = info.get("current", 0)
+        total = info.get("total", 0)
+        speed = info.get("speed", 0)
+        files_done = info.get("files_done")
+        files_total = info.get("files_total")
+
+        titles = {
+            "client": "Downloading Minecraft client...",
+            "library": "Downloading libraries...",
+            "asset": "Downloading assets...",
+            "assets_index": "Downloading asset index...",
+            "logging": "Downloading logging config...",
+            "java": "Downloading Java runtime...",
+            "java_extract": "Extracting Java runtime...",
+        }
+        if phase in titles:
+            self.status_label.setText(titles[phase])
+
+        if phase == "client":
+            pct = int(current / total * 100) if total else 0
+        elif phase == "library":
+            if files_total:
+                frac = (current / total) if total else 0
+                pct = int((files_done - 1 + frac) / files_total * 100)
+            else:
+                pct = 0
+        elif phase == "asset":
+            pct = int(files_done / files_total * 100) if files_total else 0
+        elif phase == "java":
+            pct = int(current / total * 100) if total else 0
+        else:
+            pct = 0
+        self.progress_bar.setValue(max(0, min(100, pct)))
+
+        parts = []
+        if phase == "client":
+            parts.append("client")
+        elif phase == "library":
+            parts.append("library")
+        elif phase == "asset":
+            parts.append("assets")
+        elif phase == "java_extract":
+            parts.append("java")
+        if info.get("file"):
+            parts.append(str(info["file"]))
+        if files_done is not None and files_total:
+            parts.append(f"[{files_done}/{files_total}]")
+        if total:
+            parts.append(f"{current / 1048576:.1f}/{total / 1048576:.1f} MB")
+        elif current:
+            parts.append(f"{current / 1048576:.1f} MB")
+        if speed:
+            if speed >= 1048576:
+                parts.append(f"{speed / 1048576:.1f} MB/s")
+            else:
+                parts.append(f"{speed / 1024:.0f} KB/s")
+        self.detail_label.setText("  |  ".join(parts))
+
+    def _make_offline_session(self):
+        name = self.config.player_name.strip() or "Player"
+        profile_uuid = hashlib.md5(f"OfflinePlayer:{name}".encode()).hexdigest()
+        return YggdrasilSession(
+            access_token="0",
+            client_token="0",
+            uuid=profile_uuid,
+            username=name,
+            display_name=name,
+            selected_profile={"id": profile_uuid, "name": name},
+            available_profiles=[{"id": profile_uuid, "name": name}],
+            user_properties=[],
+        )
 
     def _play(self):
         m = self.current_modpack
         if not m or self._game_running:
             return
         version = m.get("mc_version", "")
+        if not version:
+            self.status_label.setText("Modpack has no MC version")
+            return
+
+        if not self.config.account_name:
+            self.status_label.setText("Log in to your account first")
+            self._open_login()
+            if not self.config.account_name:
+                return
+
+        self._cancel_requested = False
+        self.status_label.setText("Preparing to launch...")
+        self.progress_bar.setVisible(True)
+        self.cancel_btn.setVisible(True)
+        self.cancel_btn.setEnabled(True)
+        self.progress_bar.setValue(0)
+
+        def do_prepare():
+            try:
+                if self._cancel_requested:
+                    return None
+                should_cancel = lambda: self._cancel_requested
+
+                vm = VersionManager()
+                version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""))
+                if not vm.is_version_installed(version):
+                    vm.download_version(version, self._update_progress, should_cancel)
+                if not vm.is_version_installed(version):
+                    raise RuntimeError(f"Failed to install Minecraft {version}")
+                meta = vm.get_version_meta(version)
+                if meta and meta.assets:
+                    am = AssetManager()
+                    am.download_assets(meta.assets, self._update_progress, should_cancel)
+
+                java = m.get("java_path") or self.config.java_path
+                if not java or java.strip().lower() == "java":
+                    required = int((meta.java_version or {}).get("major") or 0) or 0
+                    jm = JavaManager()
+                    java = jm.find_java(required) if required else jm.find_java()
+                    if not java and required:
+                        java = jm.download_java(required, self._update_progress, should_cancel)
+                if not java:
+                    java = "java"
+                session = self._refresh_session()
+                if session is None:
+                    return None
+                return java, version, session
+            except CancelledError:
+                return None
+
+        def on_done(result):
+            if result is None:
+                self.progress_bar.setVisible(False)
+                self.cancel_btn.setVisible(False)
+                self.detail_label.setText("")
+                self.status_label.setText("Preparation cancelled")
+                self._refresh_card_states()
+                return
+            java, eff_version, session = result
+            self._launch(m, eff_version, java, session)
+
+        def on_error(err):
+            self.progress_bar.setVisible(False)
+            self.cancel_btn.setVisible(False)
+            self.detail_label.setText("")
+            self.status_label.setText(f"Prepare failed: {err}")
+            self._refresh_card_states()
+
+        run_async(do_prepare, on_done=on_done, on_error=on_error)
+
+    def _launch(self, m, version, java, session):
+        mp_dir = get_modpack_dir(self.project["id"], m["id"])
+        if not mp_dir.exists() or not any(mp_dir.iterdir()):
+            self.progress_bar.setVisible(False)
+            self.status_label.setText("Modpack not installed")
+            return
 
         self.status_label.setText("Starting game...")
-        self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
         def do_launch():
             meta = self.version_manager.get_version_meta(version)
-            java = m.get("java_path") or self.config.java_path
             xmx = m.get("max_memory") or self.config.max_memory
             xms = m.get("min_memory") or self.config.min_memory
             jvm_args = m.get("java_args") or self.config.java_args
-            return meta, java, xmx, xms, jvm_args
+            return meta, xmx, xms, jvm_args
 
         def on_done(result):
-            meta, java, xmx, xms, jvm_args = result
-
-            class OfflineSession:
-                access_token = "offline"
-                client_token = "offline"
-                uuid = ""
-                username = "Player"
-                display_name = "Player"
-                selected_profile = {}
-                available_profiles = []
-                user_properties = {}
-
-            mp_dir = get_modpack_dir(self.project["id"], m["id"])
+            _, xmx, xms, jvm_args = result
             try:
                 self.starter.start(
                     version_id=version,
-                    session=OfflineSession(),
+                    session=session,
                     java_path=java,
                     max_mem=xmx,
                     min_mem=xms,
                     extra_jvm_args=jvm_args,
                     output_callback=lambda text: self.console.append(text),
+                    on_exit=self._game_signals.exited.emit,
                     game_dir=str(mp_dir),
                 )
                 self._game_running = True
                 self.status_label.setText("Game running")
                 self.progress_bar.setVisible(False)
+                self.detail_label.setText("")
                 self._refresh_card_states()
                 if not self.config.keep_launcher_open:
                     self.window().hide()
             except Exception as e:
                 self.progress_bar.setVisible(False)
+                self.detail_label.setText("")
                 self.status_label.setText(f"Launch failed: {e}")
                 self._refresh_card_states()
 
         def on_error(err):
             self.progress_bar.setVisible(False)
+            self.detail_label.setText("")
             self.status_label.setText(f"Error: {err}")
             self._refresh_card_states()
 
         run_async(do_launch, on_done=on_done, on_error=on_error)
 
+    def _on_game_exited(self):
+        self._game_running = False
+        self.status_label.setText("Game closed")
+        self._refresh_card_states()
+        if self.window().isHidden():
+            self.window().show()
+
     def _open_settings(self):
         dialog = SettingsDialog(self.config, self)
         if dialog.exec():
             self.config = LauncherConfig.load()
-            self.api = APIManager(self.config.api_url)
+            self.api = APIManager(self.config.api_url, verify_ssl=self.config.verify_ssl)
             self._load_project()
+
+    def _update_account_button(self):
+        name = self.config.account_name or "Login"
+        self.account_btn.setText(name)
+
+    def _on_account_clicked(self):
+        if not self.config.account_name:
+            self._open_login()
+            return
+        menu = QMenu(self)
+        account = menu.addAction(self.config.account_name)
+        account.setEnabled(False)
+        switch = menu.addAction("Switch account...")
+        logout = menu.addAction("Log out")
+        chosen = menu.exec(self.account_btn.mapToGlobal(self.account_btn.rect().bottomLeft()))
+        if chosen == switch:
+            self._open_login()
+        elif chosen == logout:
+            self._logout()
+
+    def _open_login(self):
+        dialog = LoginDialog(self.config, self)
+        if dialog.exec() and dialog.session:
+            self.config.access_token = dialog.session.access_token
+            self.config.client_token = dialog.session.client_token
+            self.config.account_uuid = dialog.session.uuid
+            self.config.account_name = dialog.session.display_name or dialog.session.username
+            self.config.account_properties = dialog.session.user_properties
+            self.config.save()
+            self._update_account_button()
+            self.status_label.setText(f"Logged in as {self.config.account_name}")
+
+    def _logout(self):
+        if self.config.access_token:
+            try:
+                auth = YggdrasilAuth(f"{self.config.api_url}/auth", verify_ssl=self.config.verify_ssl)
+                auth.invalidate(self.config.access_token, self.config.client_token)
+            except Exception:
+                pass
+        self.config.access_token = ""
+        self.config.client_token = ""
+        self.config.account_uuid = ""
+        self.config.account_name = ""
+        self.config.account_properties = []
+        self.config.save()
+        self._update_account_button()
+        self.status_label.setText("Logged out")
+
+    def _refresh_session(self):
+        if not (self.config.access_token and self.config.account_name):
+            return None
+        auth = YggdrasilAuth(f"{self.config.api_url}/auth", verify_ssl=self.config.verify_ssl)
+        if not auth.validate(self.config.access_token, self.config.client_token):
+            try:
+                auth.refresh(self.config.access_token, self.config.client_token)
+            except Exception:
+                raise RuntimeError("Session expired, please log in again")
+            self.config.access_token = auth.session.access_token
+            self.config.client_token = auth.session.client_token
+            self.config.account_uuid = auth.session.uuid
+            self.config.account_name = auth.session.display_name or self.config.account_name
+            self.config.account_properties = auth.session.user_properties
+            self.config.save()
+            self._update_account_button()
+        return self._make_session()
+
+    def _make_session(self):
+        name = self.config.account_name
+        if self.config.access_token and name:
+            profile_uuid = self.config.account_uuid
+            return YggdrasilSession(
+                access_token=self.config.access_token,
+                client_token=self.config.client_token,
+                uuid=profile_uuid,
+                username=name,
+                display_name=name,
+                selected_profile={"id": profile_uuid, "name": name},
+                available_profiles=[{"id": profile_uuid, "name": name}],
+                user_properties=self.config.account_properties or [],
+            )
+        return self._make_offline_session()
 
     def cleanup(self):
         if self._game_running:

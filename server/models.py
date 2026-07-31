@@ -37,8 +37,9 @@ class UserModel(Base):
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    access_token: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    client_token: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    access_token_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    client_token_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    token_expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
     properties: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -49,6 +50,8 @@ class ServerSessionModel(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     server_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class ProjectModel(Base):

@@ -1,11 +1,13 @@
 import json
+import secrets
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from typing import Optional
 
 
 SERVER_DIR = Path.home() / ".yamcl" / "server"
 CONFIG_FILE = SERVER_DIR / "config.json"
+
+_WEAK_PASSWORDS = {"", "blabla", "admin", "password"}
 
 
 @dataclass
@@ -13,9 +15,11 @@ class ServerConfig:
     host: str = "127.0.0.1"
     port: int = 25581
     db_path: str = ""
-    admin_password: str = "blabla"
+    admin_password: str = ""
     log_level: str = "info"
     curseforge_api_key: str = ""
+    ssl_certfile: str = ""
+    ssl_keyfile: str = ""
 
     def save(self):
         SERVER_DIR.mkdir(parents=True, exist_ok=True)
@@ -26,6 +30,7 @@ class ServerConfig:
     def load(cls):
         inst = cls()
         if not CONFIG_FILE.exists():
+            inst._ensure_secure_password()
             inst.save()
             return inst
 
@@ -39,4 +44,14 @@ class ServerConfig:
         if not inst.db_path:
             inst.db_path = str(SERVER_DIR / "auth.db")
 
+        if inst.admin_password in _WEAK_PASSWORDS:
+            inst._ensure_secure_password()
+            inst.save()
+
         return inst
+
+    def _ensure_secure_password(self):
+        generated = secrets.token_urlsafe(12)
+        self.admin_password = generated
+        print(f"[Uroboros] Generated admin panel password: {generated}")
+        print(f"[Uroboros] Save it now — it will not be shown again.")

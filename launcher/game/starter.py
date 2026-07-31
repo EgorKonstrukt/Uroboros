@@ -1,14 +1,19 @@
 import os
-import subprocess
 import json
 import shlex
+import shutil
+import subprocess
+import zipfile
 from pathlib import Path
 from typing import Optional, Callable
 from threading import Thread
 
-from launcher.utils.storage import get_versions_dir, get_libraries_dir, get_assets_dir, get_work_dir
+from launcher.utils.storage import (
+    get_versions_dir, get_libraries_dir, get_assets_dir, get_work_dir, get_log_config_path,
+)
 from launcher.game.version_manager import VersionManager
-from launcher.game.libraries_matcher import LibrariesMatcher
+from launcher.game.libraries_matcher import LibrariesMatcher, get_native_classifier_key
+from launcher.game.java_manager import JavaManager
 from launcher.api.auth import YggdrasilSession
 
 
@@ -27,11 +32,49 @@ class GameStarter:
                 lib_path = libs_dir / path
                 if lib_path.exists():
                     cp_parts.append(str(lib_path))
-        vdir = get_versions_dir() / version_id
-        jar_path = vdir / f"{version_id}.jar"
+        jar_path = get_versions_dir() / version_id / f"{version_id}.jar"
         if jar_path.exists():
             cp_parts.append(str(jar_path))
         return os.pathsep.join(cp_parts)
+
+    def extract_natives(self, meta):
+        natives_dir = get_work_dir() / "natives"
+        if natives_dir.exists():
+            shutil.rmtree(natives_dir)
+        natives_dir.mkdir(parents=True, exist_ok=True)
+        libs_dir = get_libraries_dir()
+        native_extensions = (".dll", ".so", ".dylib")
+        for lib in meta.libraries:
+            if not LibrariesMatcher.match_library(lib):
+                continue
+            dl = lib.get("downloads", {})
+            classifiers = dl.get("classifiers", {})
+            key = get_native_classifier_key(classifiers)
+            if not key:
+                continue
+            artifact = classifiers[key]
+            path = artifact.get("path", "")
+            if not path:
+                continue
+            lib_path = libs_dir / path
+            if not lib_path.exists():
+                continue
+            extract = lib.get("extract", {})
+            excludes = extract.get("exclude", []) or []
+            includes = extract.get("include", []) or []
+            try:
+                with zipfile.ZipFile(lib_path, "r") as zf:
+                    for member in zf.namelist():
+                        if not member.endswith(native_extensions):
+                            continue
+                        if includes and not any(member.startswith(inc) for inc in includes):
+                            continue
+                        if any(member.startswith(exc) for exc in excludes):
+                            continue
+                        zf.extract(member, natives_dir)
+            except (zipfile.BadZipFile, OSError):
+                continue
+        return natives_dir
 
     def _get_jvm_args(self, java_path: str, max_mem: int, min_mem: int, extra_args: str) -> list:
         args = [
@@ -42,9 +85,22 @@ class GameStarter:
         args.extend(shlex.split(extra_args))
         return args
 
+    def _user_properties_arg(self, user_props) -> str:
+        items = []
+        if isinstance(user_props, list):
+            items = user_props
+        elif isinstance(user_props, dict):
+            import base64
+            items = [
+                {"name": str(k), "value": base64.b64encode(str(v).encode("utf-8")).decode("ascii")}
+                for k, v in user_props.items()
+            ]
+        return json.dumps(items, separators=(",", ":"))
+
     def _get_game_args(self, meta, session: YggdrasilSession, game_dir: str = "", server_address: str = "", server_port: str = "") -> list:
         gdir = game_dir or str(get_work_dir())
-        auth_uuid = session.uuid.replace("-", "")
+        auth_uuid = session.uuid.replace("-", "") if session.uuid else ""
+        user_props = session.user_properties
         args_dict = {
             "${auth_player_name}": session.display_name or session.username,
             "${auth_session}": session.access_token,
@@ -53,14 +109,17 @@ class GameStarter:
             "${version_name}": meta.id,
             "${game_assets}": str(get_assets_dir()),
             "${assets_root}": str(get_assets_dir()),
+            "${assets_index_name}": meta.assets,
             "${game_directory}": gdir,
-            "${user_properties}": json.dumps(session.user_properties or {}),
+            "${user_properties}": self._user_properties_arg(user_props),
             "${user_type}": "mojang",
             "${version_type}": meta.type,
             "${natives_directory}": str(get_work_dir() / "natives"),
             "${classpath_separator}": os.pathsep,
             "${library_directory}": str(get_libraries_dir()),
             "${classpath}": self._get_classpath(meta.id, meta),
+            "${clientid}": "",
+            "${auth_xuid}": "0",
         }
 
         game_args = []
@@ -84,17 +143,26 @@ class GameStarter:
 
         return game_args
 
+    def _resolve_java(self, java_path: str, meta) -> str:
+        if java_path and java_path.strip().lower() != "java":
+            return java_path
+        required = int(meta.java_version.get("major") or 0) or 0
+        manager = JavaManager()
+        found = manager.find_java(required) if required else manager.find_java()
+        return found or (java_path if java_path else "java")
+
     def start(
         self,
         version_id: str,
         session: YggdrasilSession,
-        java_path: str = "java",
+        java_path: str = "",
         max_mem: int = 2048,
         min_mem: int = 1024,
         extra_jvm_args: str = "",
         server_address: str = "",
         server_port: str = "",
         output_callback: Optional[Callable[[str], None]] = None,
+        on_exit: Optional[Callable[[], None]] = None,
         game_dir: str = "",
     ) -> bool:
         meta = self.version_manager.get_version_meta(version_id)
@@ -102,11 +170,19 @@ class GameStarter:
             raise ValueError(f"Version {version_id} has no main class")
 
         gdir = game_dir or str(get_work_dir())
-        jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args)
-        game_args = self._get_game_args(meta, session, gdir, server_address, server_port)
-        natives_dir = get_work_dir() / "natives"
-        natives_dir.mkdir(parents=True, exist_ok=True)
+        Path(gdir).mkdir(parents=True, exist_ok=True)
+
+        java_path = self._resolve_java(java_path, meta)
         classpath = self._get_classpath(version_id, meta)
+        if not classpath:
+            raise RuntimeError(f"No libraries found for version {version_id}, run Install first")
+
+        natives_dir = self.extract_natives(meta)
+        jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args)
+        log_cfg = get_log_config_path(version_id)
+        if log_cfg.exists():
+            jvm_args.append(f"-Dlog4j.configurationFile={log_cfg}")
+        game_args = self._get_game_args(meta, session, gdir, server_address, server_port)
         cmd = jvm_args + [
             "-Djava.library.path=" + str(natives_dir),
             "-cp", classpath,
@@ -119,9 +195,9 @@ class GameStarter:
                 cwd=gdir, bufsize=1, universal_newlines=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError) as e:
             self.process = None
-            return False
+            raise RuntimeError(f"Failed to start Java ({java_path}): {e}") from e
 
         if self.process.poll() is not None:
             self.process = None
@@ -132,6 +208,12 @@ class GameStarter:
                 for line in iter(self.process.stdout.readline, ""):
                     output_callback(line.rstrip("\n"))
             Thread(target=read_output, daemon=True).start()
+
+        if on_exit:
+            def wait_exit():
+                self.process.wait()
+                on_exit()
+            Thread(target=wait_exit, daemon=True).start()
 
         return True
 

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional
 
 from launcher.utils.storage import get_launcher_dir
@@ -54,6 +54,13 @@ class LauncherConfig:
     java_args: str = "-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC"
     min_memory: int = 1024
     max_memory: int = 2048
+    player_name: str = "Player"
+    access_token: str = ""
+    client_token: str = ""
+    account_uuid: str = ""
+    account_name: str = ""
+    account_properties: list = field(default_factory=list)
+    verify_ssl: bool = True
     window_width: int = 1100
     window_height: int = 700
     keep_launcher_open: bool = True
