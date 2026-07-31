@@ -63,6 +63,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);overflow:hid
 .sidebar-server-item{display:flex;align-items:center;gap:8px;font-size:13px}
 .sidebar-server-item .server-dot{width:6px;height:6px;flex-shrink:0}
 .sidebar-server-item.active{background:rgba(25,118,210,.2);color:var(--sidebar-active-text);font-weight:500}
+.tree-group{display:flex;flex-direction:column;gap:2px}
+.tree-group-header{font-size:13px;padding:8px 12px;min-height:34px;gap:6px;color:var(--sidebar-text)}
+.tree-group-header:hover{background:var(--sidebar-hover);color:#c9d1d9}
+.tree-arrow{display:inline-block;width:14px;flex-shrink:0;text-align:center;font-size:10px;color:var(--sidebar-text)}
+.tree-group-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-count{font-size:10px;color:var(--sidebar-text);opacity:.6;padding:1px 6px;border-radius:8px;background:var(--sidebar-hover)}
+.tree-group-children{display:flex;flex-direction:column;gap:2px;padding-left:10px}
+.tree-group-children.collapsed{display:none}
 .sidebar-footer{padding:8px;border-top:1px solid rgba(255,255,255,.08)}
 #logoutBtn{display:flex;align-items:center;gap:12px;padding:10px 16px;min-height:40px;border:none;border-radius:6px;background:transparent;color:var(--sidebar-text);font-size:14px;cursor:pointer;transition:all .15s;width:100%;font-family:var(--font)}
 #logoutBtn:hover{background:rgba(211,47,47,.15);color:#ef5350}
@@ -213,7 +221,27 @@ select.config-input{background:var(--surface);cursor:pointer;appearance:auto}
 .modal .md-field input{width:100%;padding:12px 14px;border:2px solid var(--divider);border-radius:var(--radius);font-size:15px;outline:none;font-family:var(--font);transition:border-color .18s,box-shadow .18s}
 .modal .md-field input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(25,118,210,.15)}
 .modal .md-field label{display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;font-weight:600}
+.modal .md-field select,
+.modal .md-field textarea{width:100%;padding:12px 14px;border:2px solid var(--divider);border-radius:var(--radius);font-size:15px;outline:none;font-family:var(--font);background:var(--surface);color:var(--text);appearance:auto}
+.modal .md-field select:focus,
+.modal .md-field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(25,118,210,.15)}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:24px}
+
+.ban-chip{display:flex;align-items:center;gap:6px;padding:3px 8px;margin-bottom:4px;background:#ffebee;border:1px solid #ffcdd2;border-radius:4px;font-size:12px;line-height:1.4}
+.ban-chip-title{font-weight:600;color:#b71c1c}
+.ban-chip-reason{color:#8d6e63;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.ban-chip-x{border:none;background:none;color:#b71c1c;cursor:pointer;font-weight:700;padding:0 2px;line-height:1}
+.ban-chip-x:hover{color:#ff0000}
+.players-actions{white-space:nowrap}
+.players-actions .btn{margin-right:4px}
+.ban-all-check{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:8px;background:#f5f5f5;border:2px solid var(--divider);border-radius:var(--radius);font-size:14px;font-weight:600;color:var(--text);cursor:pointer}
+.ban-all-check input{width:18px;height:18px;accent-color:var(--error);cursor:pointer}
+.ban-servers-list{max-height:180px;overflow-y:auto;border:2px solid var(--divider);border-radius:var(--radius);padding:4px}
+.ban-srv-item{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:14px;color:var(--text);cursor:pointer;border-radius:4px}
+.ban-srv-item:hover{background:#e8eaf6}
+.ban-srv-item input{width:16px;height:16px;accent-color:var(--error);cursor:pointer}
+.ban-srv-item input:disabled{cursor:not-allowed;opacity:.4}
+.ban-srv-item input:disabled + *{opacity:.5}
 
 #toast{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:14px 28px;border-radius:var(--radius);font-size:14px;font-weight:600;z-index:9999;box-shadow:var(--md-elevation-4);max-width:480px;animation:toastIn .25s ease;white-space:nowrap}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(16px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}

@@ -22,6 +22,10 @@ def _migrate(conn):
         conn.execute(text("ALTER TABLE users RENAME COLUMN client_token TO client_token_hash"))
     if "token_expires_at" not in users:
         conn.execute(text("ALTER TABLE users ADD COLUMN token_expires_at DATETIME"))
+    if "last_ip" not in users:
+        conn.execute(text("ALTER TABLE users ADD COLUMN last_ip VARCHAR(64) NOT NULL DEFAULT ''"))
+    if "ip_history" not in users:
+        conn.execute(text("ALTER TABLE users ADD COLUMN ip_history TEXT NOT NULL DEFAULT '{}'"))
     sessions = _column_names(conn, "server_sessions")
     if "expires_at" not in sessions:
         conn.execute(text("ALTER TABLE server_sessions ADD COLUMN expires_at DATETIME"))

@@ -43,6 +43,9 @@ class APIManager:
         result = self._get(f"launcher/projects/{project_id}/servers")
         return result.get("items", [])
 
+    def get_bans(self, uuid: str) -> dict:
+        return self._get(f"launcher/bans/{uuid}")
+
     def download_modpack_file(self, project_id: str, modpack_id: str, filename: str, dest: Path):
         url = f"{self.base_url}/launcher/projects/{project_id}/modpacks/{modpack_id}/download/{filename}"
         resp = requests.get(url, timeout=REQUEST_TIMEOUT * 6, stream=True, verify=self.verify_ssl)

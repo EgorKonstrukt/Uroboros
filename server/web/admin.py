@@ -9,6 +9,7 @@ import hmac
 import asyncio
 import uuid
 from dataclasses import fields, asdict
+from datetime import datetime
 from typing import get_type_hints
 from pathlib import Path
 
@@ -19,9 +20,10 @@ from fastapi.staticfiles import StaticFiles
 from server.config import ServerConfig, SERVER_DIR
 from server.web.auth import require_admin, create_token, delete_token
 from server.auth.ratelimit import login_limiter
-from server.models import InstanceModel, ModpackModel
+from server.auth.crypto import hash_password
+from server.models import InstanceModel, ModpackModel, UserModel, UserBanModel, ServerSessionModel
 from server.database import get_session
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
 from server.mc.registry import (
     load_instances, get_instance,
     add_instance, remove_instance, update_instance,
@@ -29,7 +31,10 @@ from server.mc.registry import (
 )
 from server.mc.config import instance_model_to_dict, dict_to_instance_model
 from server.mc.pidfile import is_running
-from server.mc.whitelist import sync_instance_whitelist
+from server.mc.whitelist import sync_instance_whitelist, sync_all_whitelists
+from server.mc.bans import (
+    sync_all_bans, create_ban, remove_ban, remove_ban_by_id,
+)
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -141,22 +146,26 @@ def _instance_to_api(inst: InstanceModel) -> dict:
 @router.get("/instances")
 async def list_instances():
     instances = await load_instances()
+    modpack_names = {}
+    project_names = {}
+    try:
+        from server.database import get_session
+        from server.models import ModpackModel, ProjectModel
+        from sqlalchemy import select
+        async with get_session() as session:
+            mrows = (await session.execute(select(ModpackModel.id, ModpackModel.name))).all()
+            for mid, mname in mrows:
+                modpack_names[mid] = mname
+            prows = (await session.execute(select(ProjectModel.id, ProjectModel.name))).all()
+            for pid, pname in prows:
+                project_names[pid] = pname
+    except Exception:
+        pass
     result = []
     for inst in instances:
         d = _instance_to_api(inst)
-        if inst.modpack_id:
-            try:
-                from server.database import get_session
-                from server.models import ModpackModel
-                from sqlalchemy import select
-                async with get_session() as session:
-                    stmt = select(ModpackModel.name).where(ModpackModel.id == inst.modpack_id)
-                    row = (await session.execute(stmt)).scalar_one_or_none()
-                    d["modpack_name"] = row or ""
-            except Exception:
-                d["modpack_name"] = ""
-        else:
-            d["modpack_name"] = ""
+        d["modpack_name"] = modpack_names.get(inst.modpack_id or "", "") if inst.modpack_id else ""
+        d["project_name"] = project_names.get(inst.project_id or "", "") if inst.project_id else ""
         result.append(d)
     return result
 
@@ -1128,3 +1137,188 @@ async def logout(request: Request):
     if auth.startswith("Bearer "):
         delete_token(auth[7:])
     return {"status": "logged_out"}
+
+
+# ── Players management ──
+
+async def _instance_names() -> dict:
+    instances = await load_instances()
+    return {i.id: i.name for i in instances}
+
+
+@router.get("/users")
+async def admin_list_users():
+    now = datetime.now()
+    async with get_session() as session:
+        users = (await session.execute(select(UserModel).order_by(UserModel.id))).scalars().all()
+    from server.mc.bans import _match_reasons, _active_ban_rows
+    inst_names = await _instance_names()
+    active_rows = [r for r in await _active_ban_rows()
+                   if r[0].expires_at is None or r[0].expires_at > now]
+    bans_by_user = {}
+    for u in users:
+        matching = []
+        for ban, banned_user in active_rows:
+            if ban.user_id == u.id or _match_reasons(banned_user, user=u):
+                matching.append((ban, banned_user))
+        bans_by_user[u.id] = matching
+    return [
+        {
+            "id": u.id,
+            "uuid": u.uuid,
+            "username": u.username,
+            "display_name": u.display_name,
+            "email": u.email,
+            "last_ip": u.last_ip or "",
+            "created_at": str(u.created_at),
+            "bans": [
+                {
+                    "id": b.id,
+                    "instance_id": b.instance_id,
+                    "instance_name": inst_names.get(b.instance_id) if b.instance_id else "All servers",
+                    "global": b.instance_id is None,
+                    "reason": b.reason,
+                    "expires_at": str(b.expires_at) if b.expires_at else None,
+                    "permanent": b.expires_at is None,
+                    "owner": b.user_id == u.id,
+                    "via": _match_reasons(banned_user, user=u),
+                }
+                for b, banned_user in bans_by_user.get(u.id, [])
+            ],
+        }
+        for u in users
+    ]
+
+
+@router.post("/users/{user_id}/nickname")
+async def admin_change_nickname(user_id: int, body: dict):
+    new_nick = (body.get("display_name") or "").strip()
+    if not new_nick:
+        return JSONResponse(content={"error": "Nickname is required"}, status_code=400)
+    if len(new_nick) > 255:
+        return JSONResponse(content={"error": "Nickname too long (max 255 characters)"}, status_code=400)
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+        dup = await session.execute(select(UserModel).where(UserModel.display_name == new_nick))
+        if dup.scalar_one_or_none() is not None:
+            return JSONResponse(content={"error": "Nickname already in use"}, status_code=409)
+        old_nick = user.display_name
+        user.display_name = new_nick
+        auto_login = f"{old_nick}@yggdrasil"
+        if user.username == auto_login:
+            new_login = f"{new_nick}@yggdrasil"
+            dup_login = await session.execute(select(UserModel).where(UserModel.username == new_login))
+            if dup_login.scalar_one_or_none() is None:
+                user.username = new_login
+        await session.execute(
+            update(ServerSessionModel).where(ServerSessionModel.display_name == old_nick)
+            .values(display_name=new_nick)
+        )
+        await session.commit()
+    await sync_all_whitelists()
+    await sync_all_bans()
+    return {"status": "updated", "display_name": new_nick}
+
+
+@router.post("/users/{user_id}/password")
+async def admin_change_password(user_id: int, body: dict):
+    new_password = body.get("password") or ""
+    if len(new_password) < 8:
+        return JSONResponse(content={"error": "Password too short (min 8 characters)"}, status_code=400)
+    if len(new_password) > 1024:
+        return JSONResponse(content={"error": "Password too long (max 1024 characters)"}, status_code=400)
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+        user.password_hash = hash_password(new_password)
+        user.access_token_hash = ""
+        user.client_token_hash = ""
+        user.token_expires_at = None
+        await session.commit()
+    return {"status": "updated"}
+
+
+@router.post("/users/{user_id}/ban")
+async def admin_ban_user(user_id: int, body: dict):
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+
+    raw_ids = body.get("instance_ids")
+    if raw_ids is None:
+        single = (body.get("instance_id") or "").strip() or None
+        raw_ids = [single] if single else []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    if not isinstance(raw_ids, list):
+        return JSONResponse(content={"error": "Invalid instance_ids"}, status_code=400)
+
+    instance_ids = []
+    seen = set()
+    for item in raw_ids:
+        iid = (str(item) or "").strip()
+        if not iid or iid in seen:
+            continue
+        seen.add(iid)
+        inst = await get_instance(iid)
+        if inst is None:
+            return JSONResponse(content={"error": f"Instance not found: {iid}"}, status_code=404)
+        instance_ids.append(iid)
+
+    reason = (body.get("reason") or "").strip()
+    duration = body.get("duration")
+    if duration is not None:
+        try:
+            duration = int(duration)
+        except (TypeError, ValueError):
+            return JSONResponse(content={"error": "Invalid duration"}, status_code=400)
+        if duration < 0:
+            return JSONResponse(content={"error": "Invalid duration"}, status_code=400)
+
+    if not instance_ids:
+        ban_id = await create_ban(user_id, None, reason, duration)
+    else:
+        ban_id = None
+        for iid in instance_ids:
+            ban_id = await create_ban(user_id, iid, reason, duration)
+    await sync_all_bans()
+    return {"status": "banned", "ban_id": ban_id, "instance_ids": instance_ids or [None]}
+
+
+@router.post("/users/{user_id}/unban")
+async def admin_unban_user(user_id: int, body: dict):
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+    ban_id = body.get("ban_id")
+    if ban_id is not None:
+        try:
+            ban_id = int(ban_id)
+        except (TypeError, ValueError):
+            return JSONResponse(content={"error": "Invalid ban id"}, status_code=400)
+        removed = await remove_ban_by_id(user_id, ban_id)
+    else:
+        instance_id = (body.get("instance_id") or "").strip() or None
+        removed = await remove_ban(user_id, instance_id)
+    await sync_all_bans()
+    return {"status": "unbanned", "removed": removed}
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(user_id: int):
+    async with get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+        await session.execute(delete(UserBanModel).where(UserBanModel.user_id == user_id))
+        await session.execute(delete(ServerSessionModel).where(ServerSessionModel.display_name == user.display_name))
+        await session.delete(user)
+        await session.commit()
+    await sync_all_whitelists()
+    await sync_all_bans()
+    return {"status": "deleted"}

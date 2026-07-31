@@ -16,6 +16,8 @@ from .schemas import (
 )
 from .crypto import hash_password, check_password, hash_token, new_uuid, new_token
 from .ratelimit import auth_limiter
+from server.web.auth import require_admin
+from fastapi import Depends
 
 router = APIRouter()
 
@@ -41,6 +43,17 @@ def _client_ip(request: Request) -> str:
     if request.client:
         return request.client.host or ""
     return ""
+
+
+def _record_ip(user, ip: str):
+    ip = (ip or "").strip()
+    if not ip:
+        return
+    user.last_ip = ip
+    history = dict(user.ip_history or {})
+    history[ip] = _now().isoformat()
+    items = sorted(history.items(), key=lambda kv: kv[1], reverse=True)
+    user.ip_history = dict(items[:10])
 
 
 def _check_rate(request: Request) -> Optional[JSONResponse]:
@@ -131,6 +144,13 @@ async def authenticate(request: Request, body: AuthRequest):
         if not user or not check_password(body.password, user.password_hash):
             return _error("Invalid credentials")
 
+        from server.mc.bans import get_global_ban
+        ban = await get_global_ban(user, _client_ip(request))
+        if ban is not None:
+            return _error(f"You are banned: {ban.reason or 'Banned'}")
+
+        _record_ip(user, _client_ip(request))
+
         client_token = body.clientToken or new_token()
         access_token = _issue_token(user, client_token)
         await session.commit()
@@ -153,6 +173,13 @@ async def register(request: Request, body: RegisterRequest):
     if len(password) > 1024:
         return _error("Password too long (max 1024 characters)", 400)
 
+    ip = _client_ip(request)
+    from server.mc.bans import find_active_bans
+    blocked = await find_active_bans(nick=username, email=body.email or "", ip=ip)
+    if blocked:
+        ban = blocked[0][0]
+        return _error(f"You are banned: {ban.reason or 'Banned'}")
+
     async with get_session() as session:
         existing = await _get_user_by_username(session, username)
         if existing:
@@ -171,6 +198,8 @@ async def register(request: Request, body: RegisterRequest):
             email=body.email or "",
             password_hash=hash_password(password),
             properties={},
+            last_ip=ip,
+            ip_history={ip: _now().isoformat()} if ip else {},
         )
         session.add(user)
         await session.flush()
@@ -202,6 +231,7 @@ async def refresh(request: Request, body: RefreshRequest):
             return _error("Invalid clientToken")
 
         client_token = body.clientToken if body.clientToken else new_token()
+        _record_ip(user, _client_ip(request))
         access_token = _issue_token(user, client_token)
         await session.commit()
         return _user_to_auth_response(user, access_token, client_token, body.requestUser)
@@ -261,6 +291,11 @@ async def join_server(request: Request, body: JoinRequest):
         if not user or user.uuid != body.selectedProfile.replace("-", ""):
             return _error("Invalid token or profile")
 
+        from server.mc.bans import get_global_ban
+        ban = await get_global_ban(user)
+        if ban is not None:
+            return _error(f"You are banned: {ban.reason or 'Banned'}")
+
         stmt = select(ServerSessionModel).where(
             ServerSessionModel.display_name == user.display_name
         )
@@ -300,6 +335,10 @@ async def has_joined(request: Request):
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             if user:
+                from server.mc.bans import get_global_ban
+                ban = await get_global_ban(user)
+                if ban is not None:
+                    return _error("You are banned")
                 return {
                     "id": user.uuid,
                     "name": user.display_name,
@@ -323,7 +362,7 @@ async def get_profile(profile_id: str):
         return _error("Profile not found", 404)
 
 
-@router.get("/admin/users")
+@router.get("/admin/users", dependencies=[Depends(require_admin)])
 async def admin_list_users():
     async with get_session() as session:
         stmt = select(UserModel).order_by(UserModel.id)
@@ -342,7 +381,7 @@ async def admin_list_users():
         ]
 
 
-@router.get("/admin/sessions")
+@router.get("/admin/sessions", dependencies=[Depends(require_admin)])
 async def admin_list_sessions():
     async with get_session() as session:
         stmt = select(ServerSessionModel).order_by(ServerSessionModel.id)
@@ -360,7 +399,7 @@ async def admin_list_sessions():
         ]
 
 
-@router.get("/admin/stats")
+@router.get("/admin/stats", dependencies=[Depends(require_admin)])
 async def admin_stats():
     async with get_session() as session:
         user_count = (await session.execute(select(func.count(UserModel.id)))).scalar()

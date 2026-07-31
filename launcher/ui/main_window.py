@@ -47,6 +47,7 @@ class MainWindow(QWidget):
         self.modpacks = []
         self.modpack_cards = []
         self.servers = []
+        self.bans = {"global": None, "servers": []}
         self._game_running = False
         self._cancel_requested = False
         self.starter = GameStarter()
@@ -99,6 +100,15 @@ class MainWindow(QWidget):
         self.settings_btn.clicked.connect(self._open_settings)
         header.addWidget(self.settings_btn)
         layout.addLayout(header)
+
+        self.banned_label = QLabel("", self)
+        self.banned_label.setWordWrap(True)
+        self.banned_label.setVisible(False)
+        self.banned_label.setStyleSheet("""
+            QLabel { background: #3a1d24; color: #f38ba8; border: 1px solid #f38ba8;
+                border-radius: 6px; padding: 8px 14px; font-size: 13px; }
+        """)
+        layout.addWidget(self.banned_label)
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -254,6 +264,7 @@ class MainWindow(QWidget):
             self.modpack_cards.append(card)
         self._apply_servers()
         self._load_servers()
+        self._load_bans()
 
     def _load_servers(self):
         pid = self.config.project_id
@@ -270,14 +281,73 @@ class MainWindow(QWidget):
         run_async(do_fetch, on_done=on_done, on_error=lambda err: None)
 
     def _apply_servers(self):
+        banned_by_id = {}
+        for b in self.bans.get("servers", []):
+            banned_by_id[b.get("instance_id") or ""] = b
         for card in self.modpack_cards:
-            servers = [s for s in self.servers if s.get("modpack_id") == card.modpack.get("id")]
+            servers = [dict(s) for s in self.servers if s.get("modpack_id") == card.modpack.get("id")]
+            for s in servers:
+                ban = banned_by_id.get(s.get("id", ""))
+                if ban:
+                    s["banned"] = True
+                    s["ban_expires"] = ban.get("expires_at", "")
             card.set_servers(servers)
+
+    def _load_bans(self):
+        uid = self.config.account_uuid
+        if not uid:
+            self.bans = {"global": None, "servers": []}
+            self._update_ban_banner()
+            self._apply_servers()
+            return
+
+        def do_fetch():
+            return self.api.get_bans(uid)
+
+        def on_done(data):
+            self.bans = {
+                "global": data.get("global"),
+                "servers": data.get("servers", []),
+            }
+            self._update_ban_banner()
+            self._apply_servers()
+
+        def on_error(err):
+            self.bans = {"global": None, "servers": []}
+            self._update_ban_banner()
+
+        run_async(do_fetch, on_done=on_done, on_error=on_error)
+
+    def _update_ban_banner(self):
+        global_ban = self.bans.get("global")
+        server_bans = self.bans.get("servers", [])
+        if not global_ban and not server_bans:
+            self.banned_label.setVisible(False)
+            return
+        parts = []
+        if global_ban:
+            text = "You are banned from this project"
+            if global_ban.get("reason"):
+                text += f" — {global_ban['reason']}"
+            if global_ban.get("expires_at"):
+                text += f" (until {global_ban['expires_at']})"
+            parts.append(text)
+        if server_bans:
+            names = []
+            for b in server_bans:
+                n = b.get("server_name") or b.get("instance_id") or "?"
+                if b.get("expires_at"):
+                    n += f" (until {b['expires_at']})"
+                names.append(n)
+            parts.append("You are banned on: " + ", ".join(names))
+        self.banned_label.setText("\n".join(parts))
+        self.banned_label.setVisible(True)
 
     def _refresh_all(self):
         self.status_label.setText("Refreshing...")
         self._load_project(force=True)
         self._load_servers()
+        self._load_bans()
 
     def _on_install_clicked(self, modpack):
         self.current_modpack = modpack
@@ -649,6 +719,7 @@ class MainWindow(QWidget):
             self.config.save()
             self._update_account_button()
             self.status_label.setText(f"Logged in as {self.config.account_name}")
+            self._load_bans()
 
     def _logout(self):
         if self.config.access_token:
@@ -665,6 +736,7 @@ class MainWindow(QWidget):
         self.config.save()
         self._update_account_button()
         self.status_label.setText("Logged out")
+        self._load_bans()
 
     def _refresh_session(self):
         if not (self.config.access_token and self.config.account_name):

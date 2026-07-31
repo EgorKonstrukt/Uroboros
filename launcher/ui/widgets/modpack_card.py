@@ -132,8 +132,9 @@ class ModpackCard(QFrame):
             h.addWidget(label)
             h.addStretch()
 
-            btn = QPushButton("Connect", row)
-            can_connect = bool(s.get("online")) and not self._game_running
+            banned = bool(s.get("banned"))
+            btn = QPushButton("Banned" if banned else "Connect", row)
+            can_connect = bool(s.get("online")) and not self._game_running and not banned
             btn.setEnabled(can_connect)
             btn.setStyleSheet(
                 self._btn_style("#f9e2af", "#111", "#fbf0d3") if can_connect
@@ -145,6 +146,12 @@ class ModpackCard(QFrame):
 
     def _server_text(self, s: dict) -> str:
         name = s.get("name") or "Server"
+        if s.get("banned"):
+            text = f"{name}: BANNED"
+            expires = s.get("ban_expires")
+            if expires:
+                text += f" (until {expires})"
+            return text
         if s.get("running") and not s.get("online"):
             return f"{name}: starting..."
         if s.get("online"):
@@ -163,6 +170,8 @@ class ModpackCard(QFrame):
         return f"{name}: Offline"
 
     def _server_color(self, s: dict) -> str:
+        if s.get("banned"):
+            return "#f38ba8"
         if s.get("running") and not s.get("online"):
             return "#f9e2af"
         if s.get("online"):

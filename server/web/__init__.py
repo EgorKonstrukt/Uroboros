@@ -288,6 +288,56 @@ def _offline_status() -> dict:
     return {"online": False}
 
 
+@launcher_router.get("/bans/{uuid}")
+async def launcher_player_bans(uuid: str):
+    from server.mc.bans import find_active_bans, _match_reasons
+
+    from server.database import get_session
+    from server.models import InstanceModel, UserModel
+
+    clean = uuid.replace("-", "").lower()
+    async with get_session() as session:
+        user = (await session.execute(
+            select(UserModel).where(UserModel.uuid == clean)
+        )).scalar_one_or_none()
+        if user is None:
+            return JSONResponse(content={"error": "User not found"}, status_code=404)
+
+    rows = await find_active_bans(user=user)
+    instance_ids = [ban.instance_id for ban, _ in rows if ban.instance_id]
+    server_names = {}
+    if instance_ids:
+        async with get_session() as session:
+            inst_stmt = select(InstanceModel.id, InstanceModel.name).where(
+                InstanceModel.id.in_(instance_ids)
+            )
+            rows_i = (await session.execute(inst_stmt)).all()
+            server_names = dict(rows_i)
+
+    global_ban = None
+    server_bans = []
+    for ban, banned_user in rows:
+        entry = {
+            "instance_id": ban.instance_id or "",
+            "reason": ban.reason or "Banned",
+            "expires_at": str(ban.expires_at) if ban.expires_at else "",
+            "created_at": str(ban.created_at) if ban.created_at else "",
+            "via": _match_reasons(banned_user, user=user),
+        }
+        if ban.instance_id is None:
+            global_ban = entry
+        else:
+            entry["server_name"] = server_names.get(ban.instance_id, ban.instance_id)
+            server_bans.append(entry)
+
+    return {
+        "uuid": user.uuid,
+        "banned": bool(global_ban or server_bans),
+        "global": global_ban,
+        "servers": server_bans,
+    }
+
+
 @launcher_router.get("/sync/{project_id}")
 async def launcher_sync_project(project_id: str):
     async with get_session() as session:

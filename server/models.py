@@ -42,6 +42,8 @@ class UserModel(Base):
     client_token_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     token_expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
     properties: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    last_ip: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    ip_history: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -51,6 +53,17 @@ class ServerSessionModel(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     server_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class UserBanModel(Base):
+    __tablename__ = "user_bans"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=True, default=None, index=True)
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
