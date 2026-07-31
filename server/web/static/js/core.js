@@ -24,14 +24,31 @@ function toast(msg, type) {
     el.textContent = msg;
     el.className = 'toast toast-' + (type || 'info');
     el.style.display = 'block';
-    setTimeout(function () { el.style.display = 'none'; }, 4000);
+    el.classList.remove('toast-out');
+    clearTimeout(el._t1);
+    clearTimeout(el._t2);
+    el._t1 = setTimeout(function () {
+        el.classList.add('toast-out');
+        el._t2 = setTimeout(function () {
+            el.style.display = 'none';
+            el.classList.remove('toast-out');
+        }, 280);
+    }, 4000);
 }
 
 function openModal(id) {
     document.getElementById(id).style.display = 'flex';
 }
 
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function closeModal(id) {
+    var el = document.getElementById(id);
+    if (el.classList.contains('closing')) return;
+    el.classList.add('closing');
+    setTimeout(function () {
+        el.style.display = 'none';
+        el.classList.remove('closing');
+    }, 200);
+}
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function escAttr(s) { return (s || '').replace(/'/g, "\\'"); }

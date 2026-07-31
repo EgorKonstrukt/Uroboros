@@ -3,6 +3,7 @@
 var overviewTimer = null;
 var overviewSamplesById = {};
 var overviewLastDataById = {};
+var overviewAnimated = false;
 var OVERVIEW_MAX_SAMPLES = 60;
 var overviewRefreshMs = 2000;
 
@@ -151,6 +152,20 @@ function renderOverview(d) {
     ]);
 
     document.getElementById('overviewDetails').innerHTML = details;
+
+    if (!overviewAnimated) {
+        overviewAnimated = true;
+        var ovTiles = document.querySelectorAll('#overviewTiles .ov-tile');
+        for (var oi = 0; oi < ovTiles.length; oi++) {
+            ovTiles[oi].style.animation = 'fadeInUp .35s ease backwards';
+            ovTiles[oi].style.animationDelay = (oi * 0.04) + 's';
+        }
+        var ovCards = document.querySelectorAll('#overviewDetails .ov-detail-card');
+        for (var ci = 0; ci < ovCards.length; ci++) {
+            ovCards[ci].style.animation = 'fadeInUp .35s ease backwards';
+            ovCards[ci].style.animationDelay = (ci * 0.06) + 's';
+        }
+    }
 
     var memSub = document.getElementById('ovMemSub');
     var cpuSub = document.getElementById('ovCpuSub');

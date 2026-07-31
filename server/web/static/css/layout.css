@@ -24,8 +24,8 @@
 .tree-arrow{display:inline-block;width:14px;flex-shrink:0;text-align:center;font-size:10px;color:var(--text-hint)}
 .tree-group-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tree-count{font-size:11px;color:var(--text-hint);padding:0 8px;height:20px;line-height:20px;border-radius:10px;background:var(--hover-strong);font-weight:600}
-.tree-group-children{display:flex;flex-direction:column;gap:2px;padding-left:8px}
-.tree-group-children.collapsed{display:none}
+.tree-group-children{display:flex;flex-direction:column;gap:2px;padding-left:8px;overflow:hidden;height:auto;transition:height .28s cubic-bezier(.4,0,.2,1)}
+.tree-group-children.collapsed{height:0}
 .sidebar-footer{padding:8px;border-top:1px solid var(--divider)}
 #logoutBtn{display:flex;align-items:center;gap:12px;padding:0 16px;height:44px;border:none;border-radius:var(--radius);background:transparent;color:var(--text-secondary);font-size:14px;font-weight:500;cursor:pointer;transition:background .15s,color .15s;width:100%;font-family:var(--font);position:relative;overflow:hidden}
 #logoutBtn:hover{background:var(--error-tint);color:var(--error)}
@@ -77,7 +77,7 @@
 .panel-header .panel-sub{font-size:13px;color:var(--text-hint)}
 
 .server-sub-nav{display:flex;gap:0;border-bottom:1px solid var(--divider);padding:0}
-.sub-nav-item{position:relative;padding:0 20px;height:44px;border:none;background:transparent;color:var(--text-secondary);font-size:14px;font-weight:500;cursor:pointer;transition:background .15s,color .15s;font-family:var(--font);border-bottom:2px solid transparent;overflow:hidden}
+.sub-nav-item{position:relative;padding:0 20px;height:44px;border:none;background:transparent;color:var(--text-secondary);font-size:14px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,border-color .15s;font-family:var(--font);border-bottom:2px solid transparent;overflow:hidden}
 .sub-nav-item:hover{color:var(--primary);background:var(--primary-tint)}
 .sub-nav-item.active{color:var(--primary);font-weight:600;border-bottom-color:var(--primary)}
 .server-sub-panel{display:none}

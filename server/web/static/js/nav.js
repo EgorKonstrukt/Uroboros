@@ -112,7 +112,23 @@ function toggleProjectGroup(gid) {
     var arrow = group.querySelector('.tree-arrow');
     if (arrow) arrow.textContent = expandedProjects[gid] ? '▾' : '▸';
     var children = group.querySelector('.tree-group-children');
-    if (children) children.classList.toggle('collapsed', !expandedProjects[gid]);
+    if (!children) return;
+    if (expandedProjects[gid]) {
+        children.style.height = '0px';
+        children.classList.remove('collapsed');
+        void children.offsetHeight;
+        children.style.height = children.scrollHeight + 'px';
+        var fin = function () { children.style.height = 'auto'; children.removeEventListener('transitionend', fin); };
+        children.addEventListener('transitionend', fin);
+        setTimeout(fin, 300);
+    } else {
+        children.style.height = children.scrollHeight + 'px';
+        void children.offsetHeight;
+        children.style.height = '0px';
+        var done = function () { children.classList.add('collapsed'); children.removeEventListener('transitionend', done); };
+        children.addEventListener('transitionend', done);
+        setTimeout(done, 300);
+    }
 }
 
 function renderServerTabs(servers) {

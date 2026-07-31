@@ -1,0 +1,104 @@
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideInLeft{from{opacity:0;transform:translateX(-32px)}to{opacity:1;transform:translateX(0)}}
+@keyframes slideInTop{from{opacity:0;transform:translateY(-100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes popIn{0%{transform:scale(.85)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
+@keyframes overlayOut{to{opacity:0}}
+@keyframes modalOut{to{opacity:0;transform:translateY(20px) scale(.96)}}
+@keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(20px)}}
+@keyframes barStripes{from{background-position:1rem 0}to{background-position:0 0}}
+@keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes lineIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+@keyframes thumbPop{0%{transform:scale(1)}40%{transform:scale(1.3)}100%{transform:scale(1)}}
+@keyframes tabIn{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinIn{from{opacity:0;transform:rotate(-120deg) scale(.4)}to{opacity:1;transform:rotate(0) scale(1)}}
+@keyframes statusPulse{0%,100%{box-shadow:0 0 0 0 rgba(46,125,50,.35)}50%{box-shadow:0 0 0 5px rgba(46,125,50,0)}}
+
+.sidebar{animation:slideInLeft .4s cubic-bezier(.4,0,.2,1) backwards}
+.topbar{animation:slideInTop .4s cubic-bezier(.4,0,.2,1) backwards}
+.sidebar-brand{animation:fadeIn .4s ease .1s backwards}
+.brand-logo{animation:spinIn .5s cubic-bezier(.34,1.56,.64,1) backwards}
+.sidebar-footer{animation:fadeInUp .35s ease .1s backwards}
+.nav-label{animation:fadeInUp .35s ease backwards}
+.nav-item{animation:fadeInUp .3s ease backwards}
+.nav-item:nth-child(1){animation-delay:.03s}
+.nav-item:nth-child(2){animation-delay:.06s}
+.nav-item:nth-child(3){animation-delay:.09s}
+.nav-item:nth-child(4){animation-delay:.12s}
+.nav-item:nth-child(5){animation-delay:.15s}
+.nav-item:nth-child(6){animation-delay:.18s}
+.nav-item:nth-child(7){animation-delay:.21s}
+.nav-item:nth-child(8){animation-delay:.24s}
+.nav-item:nth-child(9){animation-delay:.27s}
+.nav-item:nth-child(n+10){animation-delay:.3s}
+.server-tab-bar{animation:fadeIn .25s ease backwards}
+.panel.active{animation:fadeInUp .35s ease backwards}
+.server-sub-panel.active{animation:fadeInUp .3s ease backwards}
+#serverDetailView>.row,#projectDetailView>.row{animation:fadeInUp .3s ease backwards}
+.server-sub-nav{animation:fadeInUp .3s ease .05s backwards}
+
+.project-card{animation:fadeInUp .4s cubic-bezier(.4,0,.2,1) backwards}
+.project-card:nth-child(2){animation-delay:.05s}
+.project-card:nth-child(3){animation-delay:.1s}
+.project-card:nth-child(4){animation-delay:.15s}
+.project-card:nth-child(5){animation-delay:.2s}
+.project-card:nth-child(6){animation-delay:.25s}
+.project-card:nth-child(7){animation-delay:.3s}
+.project-card:nth-child(8){animation-delay:.35s}
+.project-card:nth-child(9){animation-delay:.4s}
+.project-card:nth-child(10){animation-delay:.45s}
+.project-card:nth-child(11){animation-delay:.5s}
+.project-card:nth-child(12){animation-delay:.55s}
+.build-card{animation:fadeInUp .35s ease backwards}
+.ban-chip{animation:fadeInUp .25s ease backwards}
+.ban-srv-item{animation:fadeIn .2s ease backwards}
+
+table tbody tr{animation:fadeIn .3s ease backwards}
+table tbody tr:nth-child(2){animation-delay:.03s}
+table tbody tr:nth-child(3){animation-delay:.06s}
+table tbody tr:nth-child(4){animation-delay:.09s}
+table tbody tr:nth-child(5){animation-delay:.12s}
+table tbody tr:nth-child(6){animation-delay:.15s}
+table tbody tr:nth-child(7){animation-delay:.18s}
+table tbody tr:nth-child(8){animation-delay:.21s}
+table tbody tr:nth-child(9){animation-delay:.24s}
+table tbody tr:nth-child(10){animation-delay:.27s}
+table tbody tr:nth-child(11){animation-delay:.3s}
+table tbody tr:nth-child(12){animation-delay:.33s}
+table tbody tr:nth-child(13){animation-delay:.36s}
+table tbody tr:nth-child(14){animation-delay:.39s}
+table tbody tr:nth-child(15){animation-delay:.42s}
+table tbody tr:nth-child(n+16){animation-delay:.45s}
+
+.modal-overlay{animation:fadeIn .18s ease backwards}
+.modal-overlay.closing{animation:overlayOut .2s ease forwards}
+.modal-overlay.closing .modal{animation:modalOut .2s ease forwards}
+
+#toast.toast-out{animation:toastOut .25s ease forwards}
+
+.progress-fill{background-image:linear-gradient(90deg,rgba(255,255,255,.25) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.25) 50%,rgba(255,255,255,.25) 75%,transparent 75%);background-size:1rem 1rem;animation:barStripes .6s linear infinite}
+
+#console .line,#serverConsoleOutput .line{animation:lineIn .18s ease backwards}
+
+.config-switch input:checked + .config-switch-track .config-switch-thumb{animation:thumbPop .25s ease}
+
+.server-tab.active::after{animation:tabIn .22s ease backwards;transform-origin:left}
+.server-btn.active{animation:popIn .22s ease backwards}
+.status-online{animation:statusPulse 2s ease infinite}
+
+.login-body{background-size:200% 200%;animation:gradientShift 14s ease infinite}
+.login-card{animation:fadeInUp .55s cubic-bezier(.34,1.56,.64,1) backwards}
+
+.icon-btn svg{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
+.icon-btn:hover svg{transform:rotate(120deg)}
+.btn-loading::after{content:'';width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+.btn:focus-visible,.icon-btn:focus-visible,.nav-item:focus-visible,.server-tab:focus-visible,.sub-nav-item:focus-visible,.server-tab-add:focus-visible,#logoutBtn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--primary-tint)}
+
+body,.sidebar,.topbar,.content,.md-card,.ov-tile,.badge,.stat-value,.login-card,.status-text,.status-online,.page-title,.panel-header h3,.overview-live,.dir-display,table thead th,table tbody td{transition:background-color .25s,color .25s,border-color .25s,box-shadow .25s}
+table tbody tr{transition:background-color .15s}
+.content{scroll-behavior:smooth}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
