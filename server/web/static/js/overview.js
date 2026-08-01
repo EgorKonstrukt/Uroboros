@@ -76,18 +76,24 @@ function fmtDate(ts) {
 }
 
 function renderOverview(d) {
+    var stateText = d.stopping ? 'stopping' : (d.starting ? 'starting' : (d.running ? 'running' : 'stopped'));
+    var liveOn = d.running || d.starting || d.stopping;
     document.getElementById('ovLastUpdate').textContent =
-        'Updated ' + new Date().toLocaleTimeString() + (d.running ? ' · running' : ' · stopped') + ' · every ' + (d.refresh_interval || 2) + 's';
+        'Updated ' + new Date().toLocaleTimeString() + ' · ' + stateText + ' · every ' + (d.refresh_interval || 2) + 's';
     var live = document.getElementById('ovLiveDot');
-    live.classList.toggle('off', !d.running);
-    live.textContent = d.running ? 'Live' : 'Offline';
+    live.classList.toggle('off', !liveOn);
+    live.textContent = liveOn ? 'Live' : 'Offline';
 
     var p = d.process;
     var sys = d.system;
     var players = d.players;
 
     var tiles = [];
-    tiles.push({ label: 'Status', value: d.running ? 'RUNNING' : 'STOPPED', cls: d.running ? 'running' : 'stopped', sub: d.running ? 'process active' : (d.last_error || 'no process') });
+    var statusValue, statusCls, statusSub;
+    if (d.stopping) { statusValue = 'STOPPING'; statusCls = 'stopping'; statusSub = 'graceful shutdown'; }
+    else if (d.starting) { statusValue = 'STARTING'; statusCls = 'starting'; statusSub = 'booting'; }
+    else { statusValue = d.running ? 'RUNNING' : 'STOPPED'; statusCls = d.running ? 'running' : 'stopped'; statusSub = d.running ? 'process active' : (d.last_error || 'no process'); }
+    tiles.push({ label: 'Status', value: statusValue, cls: statusCls, sub: statusSub });
     tiles.push({ label: 'PID', value: p ? p.pid : '—', sub: p ? p.status : 'n/a' });
     tiles.push({ label: 'Uptime', value: p ? fmtUptime(p.uptime_seconds) : '—', sub: p ? 'since ' + fmtDate(p.create_time) : '' });
     tiles.push({ label: 'Players', value: players ? players.online + '/' + players.max : '—', sub: players ? 'online / max' : 'no data' });

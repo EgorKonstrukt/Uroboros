@@ -1,9 +1,9 @@
 import sys
-from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
 from launcher.config import LauncherConfig
+from launcher.theme import load_theme
 from launcher.utils.storage import ensure_dirs
 from launcher.ui.main_window import MainWindow
 
@@ -21,16 +21,12 @@ class UroborosApplication:
 
         self.main_window = MainWindow(self.config)
         self.main_window.setWindowTitle("Uroboros")
-        self.main_window.resize(self.config.window_width, self.config.window_height)
         self.main_window.show()
 
         self.app.aboutToQuit.connect(self._cleanup)
 
     def _load_theme(self):
-        theme_path = Path(__file__).parent / "theme.qss"
-        if theme_path.exists():
-            with open(theme_path, "r", encoding="utf-8") as f:
-                self.app.setStyleSheet(f.read())
+        self.app.setStyleSheet(load_theme(self.config.theme_mode))
 
     def _cleanup(self):
         self.main_window.cleanup()

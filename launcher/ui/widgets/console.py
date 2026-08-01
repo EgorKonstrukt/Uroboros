@@ -17,13 +17,14 @@ class ConsoleWidget(QWidget):
 
         toolbar = QHBoxLayout()
         clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("ConsoleClearButton")
         clear_btn.clicked.connect(self.clear)
         toolbar.addStretch()
         toolbar.addWidget(clear_btn)
 
         self.output = QTextEdit(self)
+        self.output.setObjectName("ConsoleOutput")
         self.output.setReadOnly(True)
-        self.output.setStyleSheet("font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;")
 
         self.append_requested.connect(self._do_append)
 

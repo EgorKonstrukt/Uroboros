@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
@@ -6,6 +6,8 @@ class ModpackCard(QFrame):
     install_clicked = pyqtSignal(object)
     play_clicked = pyqtSignal(object)
     connect_clicked = pyqtSignal(object, object)
+    settings_clicked = pyqtSignal(object)
+    delete_clicked = pyqtSignal(object)
 
     def __init__(self, modpack: dict, installed: bool = False, game_running: bool = False, parent=None):
         super().__init__(parent)
@@ -15,28 +17,21 @@ class ModpackCard(QFrame):
         self._servers = []
 
         self.setObjectName("ModpackCard")
-        self.setStyleSheet("""
-            QFrame#ModpackCard {
-                background: #1e1e2e; border: 1px solid #313244;
-                border-radius: 8px; padding: 0px;
-            }
-            QFrame#ModpackCard:hover { border-color: #89b4fa; }
-        """)
         layout = QVBoxLayout(self)
         layout.setSpacing(6)
         layout.setContentsMargins(14, 12, 14, 12)
 
         header = QHBoxLayout()
         icon = QLabel(modpack.get("name", "?")[0].upper(), self)
+        icon.setObjectName("ModpackIcon")
         icon.setFixedSize(36, 36)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet("background: #89b4fa; color: #111; font-weight: bold; font-size: 16px; border-radius: 6px;")
         header.addWidget(icon)
 
         info = QVBoxLayout()
         info.setSpacing(1)
         name = QLabel(modpack.get("name", "Unknown"), self)
-        name.setStyleSheet("font-weight: bold; font-size: 14px; color: #cdd6f4;")
+        name.setObjectName("ModpackName")
         info.addWidget(name)
 
         mc = modpack.get("mc_version", "")
@@ -49,15 +44,15 @@ class ModpackCard(QFrame):
             meta_parts.append(f"{loader} {lv or ''}")
         meta_parts.append(f"{modpack.get('file_count', 0)} files")
         meta_label = QLabel("  |  ".join(meta_parts), self)
-        meta_label.setStyleSheet("font-size: 12px; color: #6c7086;")
+        meta_label.setObjectName("ModpackMeta")
         info.addWidget(meta_label)
         header.addLayout(info, 1)
         layout.addLayout(header)
 
         if modpack.get("description"):
             desc = QLabel(modpack["description"], self)
+            desc.setObjectName("ModpackDesc")
             desc.setWordWrap(True)
-            desc.setStyleSheet("font-size: 12px; color: #a6adc8; margin-top: 2px;")
             desc.setMaximumHeight(36)
             layout.addWidget(desc)
 
@@ -68,43 +63,51 @@ class ModpackCard(QFrame):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        self.install_btn = QPushButton("Install" if not installed else "Reinstall", self)
-        self.install_btn.setStyleSheet(self._btn_style("#89b4fa", "#111", "#b4d0fb"))
-        self.install_btn.clicked.connect(lambda: self.install_clicked.emit(self.modpack))
-        btn_row.addWidget(self.install_btn)
+        self.primary_btn = QPushButton(self)
+        self.primary_btn.clicked.connect(self._on_primary_clicked)
+        btn_row.addWidget(self.primary_btn)
 
-        self.play_btn = QPushButton("Play", self)
-        self.play_btn.setEnabled(installed and not game_running)
-        self.play_btn.setStyleSheet(
-            self._btn_style("#a6e3a1", "#111", "#b8f0b5") if self.play_btn.isEnabled()
-            else self._btn_style("#45475a", "#6c7086")
-        )
-        self.play_btn.clicked.connect(lambda: self.play_clicked.emit(self.modpack))
-        btn_row.addWidget(self.play_btn)
-
-        if installed:
-            badge = QLabel("Installed", self)
-            badge.setStyleSheet("color: #a6e3a1; font-size: 11px; font-weight: bold; padding: 4px 8px; border: 1px solid #a6e3a1; border-radius: 4px;")
-            btn_row.addWidget(badge)
+        self.menu_btn = QPushButton("⋮", self)
+        self.menu_btn.setObjectName("CardMenuButton")
+        self.menu = QMenu(self)
+        self.menu_btn.setMenu(self.menu)
+        btn_row.addWidget(self.menu_btn)
 
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-    def _btn_style(self, bg, fg, hover_bg=None):
-        base = f"background: {bg}; color: {fg}; border: none; border-radius: 4px; padding: 6px 16px; font-weight: bold; font-size: 12px;"
-        if hover_bg:
-            base += f" QPushButton:hover {{ background: {hover_bg}; }}"
-        return base
+        self._update_primary(installed)
+        self._build_menu(installed)
+
+    @staticmethod
+    def _repolish(widget):
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def _on_primary_clicked(self):
+        if self._installed:
+            self.play_clicked.emit(self.modpack)
+        else:
+            self.install_clicked.emit(self.modpack)
+
+    def _update_primary(self, installed: bool):
+        self.primary_btn.setText("Play" if installed else "Install")
+        self.primary_btn.setObjectName("PlayButton" if installed else "InstallButton")
+        self.primary_btn.setEnabled(not self._game_running if installed else True)
+        self._repolish(self.primary_btn)
+
+    def _build_menu(self, installed: bool):
+        self.menu.clear()
+        self.menu.addAction("Settings", lambda: self.settings_clicked.emit(self.modpack))
+        if installed:
+            self.menu.addAction("Reinstall", lambda: self.install_clicked.emit(self.modpack))
+            self.menu.addAction("Delete", lambda: self.delete_clicked.emit(self.modpack))
 
     def set_installed(self, installed: bool, game_running: bool = False):
         self._installed = installed
         self._game_running = game_running
-        self.install_btn.setText("Install" if not installed else "Reinstall")
-        self.play_btn.setEnabled(installed and not game_running)
-        if installed and not game_running:
-            self.play_btn.setStyleSheet(self._btn_style("#a6e3a1", "#111", "#b8f0b5"))
-        else:
-            self.play_btn.setStyleSheet(self._btn_style("#45475a", "#6c7086"))
+        self._update_primary(installed)
+        self._build_menu(installed)
         if self._servers:
             self.set_servers(self._servers)
 
@@ -119,7 +122,7 @@ class ModpackCard(QFrame):
             return
 
         header = QLabel("Servers", self)
-        header.setStyleSheet("font-size: 12px; font-weight: bold; color: #9399b2; margin-top: 4px;")
+        header.setObjectName("ServerHeader")
         self.servers_container.addWidget(header)
 
         for s in self._servers:
@@ -128,18 +131,17 @@ class ModpackCard(QFrame):
             h.setContentsMargins(0, 0, 0, 0)
             h.setSpacing(8)
             label = QLabel(self._server_text(s), row)
-            label.setStyleSheet(f"font-size: 12px; color: {self._server_color(s)};")
+            label.setObjectName("ServerLabel")
+            label.setProperty("status", self._server_status(s))
+            self._repolish(label)
             h.addWidget(label)
             h.addStretch()
 
             banned = bool(s.get("banned"))
             btn = QPushButton("Banned" if banned else "Connect", row)
+            btn.setObjectName("ServerButton")
             can_connect = bool(s.get("online")) and not self._game_running and not banned
             btn.setEnabled(can_connect)
-            btn.setStyleSheet(
-                self._btn_style("#f9e2af", "#111", "#fbf0d3") if can_connect
-                else self._btn_style("#45475a", "#6c7086")
-            )
             btn.clicked.connect(lambda checked=False, srv=s: self.connect_clicked.emit(self.modpack, srv))
             h.addWidget(btn)
             self.servers_container.addWidget(row)
@@ -169,11 +171,11 @@ class ModpackCard(QFrame):
             return "  |  ".join(parts)
         return f"{name}: Offline"
 
-    def _server_color(self, s: dict) -> str:
+    def _server_status(self, s: dict) -> str:
         if s.get("banned"):
-            return "#f38ba8"
+            return "banned"
         if s.get("running") and not s.get("online"):
-            return "#f9e2af"
+            return "starting"
         if s.get("online"):
-            return "#a6e3a1"
-        return "#f38ba8"
+            return "online"
+        return "offline"

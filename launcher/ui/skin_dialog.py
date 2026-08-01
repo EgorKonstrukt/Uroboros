@@ -27,16 +27,13 @@ class SkinDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
 
         title = QLabel("Change skin", self)
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #cdd6f4;")
+        title.setObjectName("DialogTitle")
         layout.addWidget(title)
 
         self.preview = QLabel("No skin", self)
+        self.preview.setObjectName("SkinPreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setFixedSize(128, 192)
-        self.preview.setStyleSheet(
-            "border: 1px dashed #45475a; border-radius: 8px; color: #6c7086;"
-            "background: #181825; font-size: 12px;"
-        )
         layout.addWidget(self.preview, alignment=Qt.AlignmentFlag.AlignCenter)
 
         row = QHBoxLayout()
@@ -50,13 +47,13 @@ class SkinDialog(QDialog):
         layout.addLayout(row)
 
         self.file_label = QLabel("", self)
-        self.file_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+        self.file_label.setObjectName("SkinFileLabel")
         self.file_label.setWordWrap(True)
         layout.addWidget(self.file_label)
 
         self.error_label = QLabel("", self)
+        self.error_label.setObjectName("DialogError")
         self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet("color: #f38ba8; font-size: 12px;")
         layout.addWidget(self.error_label)
 
         self.upload_btn = QPushButton("Upload", self)

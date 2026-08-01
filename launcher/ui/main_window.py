@@ -1,8 +1,9 @@
 import hashlib
+import shutil
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QPushButton, QProgressBar, QMenu,
+    QPushButton, QProgressBar, QMenu, QMessageBox, QApplication,
 )
 from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
 
@@ -15,11 +16,12 @@ from launcher.game.starter import GameStarter
 from launcher.game.version_manager import VersionManager
 from launcher.game.assets import AssetManager
 from launcher.game.java_manager import JavaManager
-from launcher.ui.widgets.console import ConsoleWidget
+from launcher.ui.console_window import ConsoleWindow
 from launcher.ui.widgets.modpack_card import ModpackCard
 from launcher.utils.storage import get_modpack_dir
 from launcher.utils.async_worker import run_async
 from launcher.utils.progress import CancelledError
+from launcher.theme import load_theme
 
 
 INSTALL_MARKER = "installed.marker"
@@ -54,6 +56,7 @@ class MainWindow(QWidget):
         self.version_manager = VersionManager()
 
         self._setup_ui()
+        self._restore_geometry()
         self._game_signals = _GameSignals()
         self._game_signals.exited.connect(self._on_game_exited)
         self._game_signals.progress.connect(self._apply_progress)
@@ -64,7 +67,6 @@ class MainWindow(QWidget):
 
     def _setup_ui(self):
         self.setObjectName("MainWindow")
-        self.setStyleSheet("QWidget#MainWindow { background: #11111b; }")
         layout = QVBoxLayout(self)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -72,121 +74,159 @@ class MainWindow(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(20, 12, 20, 12)
         self.title_label = QLabel("Uroboros", self)
-        self.title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #cdd6f4;")
+        self.title_label.setObjectName("TitleLabel")
         header.addWidget(self.title_label)
         header.addStretch()
         self.account_btn = QPushButton("Login", self)
-        self.account_btn.setStyleSheet("""
-            QPushButton { background: #313244; color: #a6e3a1; border: none;
-                border-radius: 6px; padding: 8px 18px; font-size: 13px; }
-            QPushButton:hover { background: #45475a; }
-        """)
+        self.account_btn.setObjectName("AccountButton")
         self.account_btn.clicked.connect(self._on_account_clicked)
         header.addWidget(self.account_btn)
         self.refresh_btn = QPushButton("Refresh", self)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton { background: #313244; color: #f9e2af; border: none;
-                border-radius: 6px; padding: 8px 18px; font-size: 13px; }
-            QPushButton:hover { background: #45475a; }
-        """)
+        self.refresh_btn.setObjectName("RefreshButton")
         self.refresh_btn.clicked.connect(self._refresh_all)
         header.addWidget(self.refresh_btn)
         self.settings_btn = QPushButton("Settings", self)
-        self.settings_btn.setStyleSheet("""
-            QPushButton { background: #313244; color: #cdd6f4; border: none;
-                border-radius: 6px; padding: 8px 18px; font-size: 13px; }
-            QPushButton:hover { background: #45475a; }
-        """)
+        self.settings_btn.setObjectName("SettingsButton")
         self.settings_btn.clicked.connect(self._open_settings)
         header.addWidget(self.settings_btn)
         layout.addLayout(header)
 
         self.banned_label = QLabel("", self)
+        self.banned_label.setObjectName("BannedLabel")
         self.banned_label.setWordWrap(True)
         self.banned_label.setVisible(False)
-        self.banned_label.setStyleSheet("""
-            QLabel { background: #3a1d24; color: #f38ba8; border: 1px solid #f38ba8;
-                border-radius: 6px; padding: 8px 14px; font-size: 13px; }
-        """)
         layout.addWidget(self.banned_label)
 
         scroll = QScrollArea(self)
+        scroll.setObjectName("MainScroll")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         content = QWidget()
-        content.setStyleSheet("background: transparent;")
+        content.setObjectName("MainContent")
         self.content_layout = QVBoxLayout(content)
         self.content_layout.setSpacing(8)
         self.content_layout.setContentsMargins(20, 8, 20, 20)
 
         self.loading_label = QLabel("Loading project...", content)
+        self.loading_label.setObjectName("LoadingLabel")
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loading_label.setStyleSheet("color: #6c7086; font-size: 14px;")
         self.content_layout.addWidget(self.loading_label)
 
         self.project_section = QWidget(content)
+        self.project_section.setObjectName("ProjectSection")
         self.project_section.setVisible(False)
-        self.project_section.setStyleSheet("background: transparent;")
         ps_layout = QVBoxLayout(self.project_section)
         ps_layout.setSpacing(8)
         ps_layout.setContentsMargins(0, 0, 0, 0)
 
         self.desc_label = QLabel("", self.project_section)
+        self.desc_label.setObjectName("DescLabel")
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("color: #a6adc8; font-size: 13px;")
         ps_layout.addWidget(self.desc_label)
 
         self.modpacks_header = QLabel("Modpacks", self.project_section)
-        self.modpacks_header.setStyleSheet("font-size: 15px; font-weight: bold; color: #cdd6f4; margin-top: 4px;")
+        self.modpacks_header.setObjectName("ModpacksHeader")
         ps_layout.addWidget(self.modpacks_header)
 
         self.cards_widget = QWidget(self.project_section)
-        self.cards_widget.setStyleSheet("background: transparent;")
+        self.cards_widget.setObjectName("CardsWidget")
         self.cards_layout = QVBoxLayout(self.cards_widget)
         self.cards_layout.setSpacing(8)
         self.cards_layout.setContentsMargins(0, 0, 0, 0)
         ps_layout.addWidget(self.cards_widget)
 
-        self.status_label = QLabel("", self.project_section)
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #6c7086; font-size: 12px;")
-        ps_layout.addWidget(self.status_label)
-
-        progress_row = QHBoxLayout()
-        progress_row.setSpacing(8)
-        self.progress_bar = QProgressBar(self.project_section)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { border: none; border-radius: 4px; background: #313244;
-                height: 8px; text-align: center; font-size: 11px; color: #6c7086; }
-            QProgressBar::chunk { background: #89b4fa; border-radius: 4px; }
-        """)
-        progress_row.addWidget(self.progress_bar, 1)
-        self.cancel_btn = QPushButton("Cancel", self.project_section)
-        self.cancel_btn.setVisible(False)
-        self.cancel_btn.setStyleSheet("""
-            QPushButton { background: #f38ba8; color: #111; border: none;
-                border-radius: 4px; padding: 6px 14px; font-weight: bold; font-size: 12px; }
-            QPushButton:hover { background: #f5a0b8; }
-        """)
-        self.cancel_btn.clicked.connect(self._cancel_install)
-        progress_row.addWidget(self.cancel_btn)
-        ps_layout.addLayout(progress_row)
-
-        self.detail_label = QLabel("", self.project_section)
-        self.detail_label.setStyleSheet("color: #a6adc8; font-size: 12px; font-family: 'Consolas', 'Courier New', monospace;")
-        self.detail_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        ps_layout.addWidget(self.detail_label)
-
         self.content_layout.addWidget(self.project_section)
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
 
-        self.console = ConsoleWidget(self)
-        self.console.setMaximumHeight(150)
-        layout.addWidget(self.console)
+        self.console_window = ConsoleWindow(self.config)
+        self.console = self.console_window.console
+        self._apply_console_mode()
+
+        self.download_status = QWidget(self)
+        self.download_status.setObjectName("DownloadStatus")
+        ds_layout = QVBoxLayout(self.download_status)
+        ds_layout.setContentsMargins(20, 8, 20, 8)
+        ds_layout.setSpacing(4)
+
+        self.status_label = QLabel("", self.download_status)
+        self.status_label.setObjectName("StatusLabel")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ds_layout.addWidget(self.status_label)
+
+        progress_row = QHBoxLayout()
+        progress_row.setSpacing(8)
+        self.progress_bar = QProgressBar(self.download_status)
+        self.progress_bar.setVisible(False)
+        progress_row.addWidget(self.progress_bar, 1)
+        self.cancel_btn = QPushButton("Cancel", self.download_status)
+        self.cancel_btn.setObjectName("CancelButton")
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self._cancel_install)
+        progress_row.addWidget(self.cancel_btn)
+        ds_layout.addLayout(progress_row)
+
+        self.detail_rows = {}
+        self.details_widget = QWidget(self.download_status)
+        self.details_widget.setObjectName("DetailsWidget")
+        details_layout = QVBoxLayout(self.details_widget)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(2)
+        for key, name in (("phase", "Phase"), ("file", "File"), ("files", "Files"), ("size", "Size"), ("speed", "Speed")):
+            row = QWidget(self.details_widget)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            k = QLabel(name, row)
+            k.setObjectName("DetailKey")
+            k.setFixedWidth(52)
+            v = QLabel("", row)
+            v.setObjectName("DetailValue")
+            v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row_layout.addWidget(k)
+            row_layout.addWidget(v, 1)
+            details_layout.addWidget(row)
+            self.detail_rows[key] = (row, k, v)
+        self.details_widget.setVisible(False)
+        ds_layout.addWidget(self.details_widget)
+
+        layout.addWidget(self.download_status)
+
+    def _set_detail(self, key: str, text: str):
+        row, k, v = self.detail_rows[key]
+        v.setText(text)
+        row.setVisible(bool(text))
+        any_visible = any(not r.isHidden() for r, _, _ in self.detail_rows.values())
+        self.details_widget.setVisible(any_visible)
+
+    def _clear_details(self):
+        for key in self.detail_rows:
+            self._set_detail(key, "")
+
+    def _apply_console_mode(self):
+        if self.config.console_mode == "always":
+            self.console_window.show()
+        else:
+            self.console_window.hide()
+
+    def _restore_geometry(self):
+        self.resize(self.config.window_width, self.config.window_height)
+        if self.config.window_x >= 0 and self.config.window_y >= 0:
+            self.move(self.config.window_x, self.config.window_y)
+
+    def _save_geometry(self):
+        geo = self.geometry()
+        self.config.window_width = geo.width()
+        self.config.window_height = geo.height()
+        self.config.window_x = geo.x()
+        self.config.window_y = geo.y()
+        self.config.save()
+
+    def closeEvent(self, event):
+        self._save_geometry()
+        self.console_window.close()
+        super().closeEvent(event)
 
     def _load_project(self, force: bool = False):
         pid = self.config.project_id
@@ -232,7 +272,7 @@ class MainWindow(QWidget):
         title = p.get("brand_name") or p.get("name") or "Uroboros"
         self.title_label.setText(title)
         color = p.get("primary_color", "#89b4fa")
-        self.title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
+        self.title_label.setStyleSheet(f"color: {color};")
         self.desc_label.setText(p.get("description", ""))
         self.status_label.setText("")
         self._render_cards()
@@ -248,7 +288,7 @@ class MainWindow(QWidget):
         self._clear_cards()
         if not self.modpacks:
             no = QLabel("No modpacks available", self.cards_widget)
-            no.setStyleSheet("color: #6c7086; font-size: 13px; padding: 20px;")
+            no.setObjectName("EmptyLabel")
             no.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.cards_layout.addWidget(no)
             return
@@ -260,6 +300,8 @@ class MainWindow(QWidget):
             card.install_clicked.connect(self._on_install_clicked)
             card.play_clicked.connect(self._on_play_clicked)
             card.connect_clicked.connect(self._on_connect_clicked)
+            card.settings_clicked.connect(self._on_modpack_settings_clicked)
+            card.delete_clicked.connect(self._on_delete_clicked)
             self.cards_layout.addWidget(card)
             self.modpack_cards.append(card)
         self._apply_servers()
@@ -364,6 +406,44 @@ class MainWindow(QWidget):
             server_port=str(server.get("port", 25565)),
         )
 
+    def _on_modpack_settings_clicked(self, modpack):
+        from launcher.ui.modpack_settings_dialog import ModpackSettingsDialog
+        dialog = ModpackSettingsDialog(self.config, self.project["id"], modpack, self)
+        dialog.exec()
+
+    def _on_delete_clicked(self, modpack):
+        if self._game_running:
+            self.status_label.setText("Cannot delete modpack while game is running")
+            return
+        mp_dir = get_modpack_dir(self.project["id"], modpack["id"])
+        if not _is_modpack_installed(mp_dir):
+            self._refresh_card_states()
+            return
+        name = modpack.get("name") or modpack.get("id") or "this modpack"
+        answer = QMessageBox.question(
+            self,
+            "Delete modpack",
+            f"Delete '{name}' and all its files? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            shutil.rmtree(mp_dir, ignore_errors=True)
+            key = f"{self.project['id']}:{modpack.get('id', '')}"
+            if self.config.modpack_settings.pop(key, None):
+                self.config.save()
+            self.status_label.setText(f"Modpack '{name}' deleted")
+        except Exception as e:
+            self.status_label.setText(f"Delete failed: {e}")
+        self._refresh_card_states()
+
+    def _modpack_override(self, modpack_id: str) -> dict:
+        if not self.project:
+            return {}
+        return dict(self.config.modpack_settings.get(f"{self.project['id']}:{modpack_id}", {}) or {})
+
     def _refresh_card_states(self):
         for card in self.modpack_cards:
             mp_dir = get_modpack_dir(self.project["id"], card.modpack["id"])
@@ -440,7 +520,7 @@ class MainWindow(QWidget):
         def on_done(result):
             self.progress_bar.setVisible(False)
             self.cancel_btn.setVisible(False)
-            self.detail_label.setText("")
+            self._clear_details()
             if result == "cancelled":
                 self.status_label.setText("Installation cancelled")
             elif result:
@@ -452,7 +532,7 @@ class MainWindow(QWidget):
         def on_error(err):
             self.progress_bar.setVisible(False)
             self.cancel_btn.setVisible(False)
-            self.detail_label.setText("")
+            self._clear_details()
             self.status_label.setText(f"Install failed: {err}")
 
         run_async(do_install, on_done=on_done, on_error=on_error)
@@ -502,29 +582,35 @@ class MainWindow(QWidget):
             pct = 0
         self.progress_bar.setValue(max(0, min(100, pct)))
 
-        parts = []
-        if phase == "client":
-            parts.append("client")
-        elif phase == "library":
-            parts.append("library")
-        elif phase == "asset":
-            parts.append("assets")
-        elif phase == "java_extract":
-            parts.append("java")
-        if info.get("file"):
-            parts.append(str(info["file"]))
+        phase_names = {
+            "client": "Client",
+            "library": "Libraries",
+            "asset": "Assets",
+            "assets_index": "Asset index",
+            "logging": "Logging config",
+            "java": "Java runtime",
+            "java_extract": "Java extract",
+            "neoforge": "NeoForge",
+        }
+        self._set_detail("phase", phase_names.get(phase, ""))
+        self._set_detail("file", str(info.get("file", "")) if info.get("file") else "")
         if files_done is not None and files_total:
-            parts.append(f"[{files_done}/{files_total}]")
+            self._set_detail("files", f"{files_done} / {files_total}")
+        else:
+            self._set_detail("files", "")
         if total:
-            parts.append(f"{current / 1048576:.1f}/{total / 1048576:.1f} MB")
+            self._set_detail("size", f"{current / 1048576:.1f} / {total / 1048576:.1f} MB")
         elif current:
-            parts.append(f"{current / 1048576:.1f} MB")
+            self._set_detail("size", f"{current / 1048576:.1f} MB")
+        else:
+            self._set_detail("size", "")
         if speed:
             if speed >= 1048576:
-                parts.append(f"{speed / 1048576:.1f} MB/s")
+                self._set_detail("speed", f"{speed / 1048576:.1f} MB/s")
             else:
-                parts.append(f"{speed / 1024:.0f} KB/s")
-        self.detail_label.setText("  |  ".join(parts))
+                self._set_detail("speed", f"{speed / 1024:.0f} KB/s")
+        else:
+            self._set_detail("speed", "")
 
     def _make_offline_session(self):
         name = self.config.account_name.strip() or "Player"
@@ -584,14 +670,20 @@ class MainWindow(QWidget):
                     am = AssetManager()
                     am.download_assets(meta.assets, self._update_progress, should_cancel)
 
-                java = m.get("java_path") or self.config.java_path
+                over = self._modpack_override(m.get("id", ""))
+                java = over.get("java_path") or m.get("java_path") or self.config.java_path
                 if not java or java.strip().lower() == "java":
                     jv = meta.java_version or {}
                     required = int(jv.get("majorVersion") or jv.get("major") or 0) or 0
+                    if not required:
+                        required = JavaManager.java_required_for_mc(m.get("mc_version", ""))
                     jm = JavaManager()
-                    java = jm.find_java(required) if required else jm.find_java()
+                    java = jm.ensure_java(required, self._update_progress, should_cancel)
                     if not java and required:
-                        java = jm.download_java(required, self._update_progress, should_cancel)
+                        raise RuntimeError(
+                            f"Java {required} required for Minecraft {m.get('mc_version', '')} "
+                            f"could not be found or installed"
+                        )
                 if not java:
                     java = "java"
                 session = self._refresh_session()
@@ -605,7 +697,7 @@ class MainWindow(QWidget):
             if result == "no_session":
                 self.progress_bar.setVisible(False)
                 self.cancel_btn.setVisible(False)
-                self.detail_label.setText("")
+                self._clear_details()
                 self.status_label.setText("Session expired — please log in")
                 self._refresh_card_states()
                 self._open_login()
@@ -613,7 +705,7 @@ class MainWindow(QWidget):
             if result is None:
                 self.progress_bar.setVisible(False)
                 self.cancel_btn.setVisible(False)
-                self.detail_label.setText("")
+                self._clear_details()
                 self.status_label.setText("Preparation cancelled")
                 self._refresh_card_states()
                 return
@@ -623,7 +715,7 @@ class MainWindow(QWidget):
         def on_error(err):
             self.progress_bar.setVisible(False)
             self.cancel_btn.setVisible(False)
-            self.detail_label.setText("")
+            self._clear_details()
             self.status_label.setText(f"Prepare failed: {err}")
             self._refresh_card_states()
             if "Session expired" in err:
@@ -646,9 +738,10 @@ class MainWindow(QWidget):
 
         def do_launch():
             meta = self.version_manager.get_version_meta(version)
-            xmx = m.get("max_memory") or self.config.max_memory
-            xms = m.get("min_memory") or self.config.min_memory
-            jvm_args = m.get("java_args") or self.config.java_args
+            over = self._modpack_override(m.get("id", ""))
+            xmx = over.get("max_memory") or m.get("max_memory") or self.config.max_memory
+            xms = over.get("min_memory") or m.get("min_memory") or self.config.min_memory
+            jvm_args = over.get("java_args") or m.get("java_args") or self.config.java_args
             return meta, xmx, xms, jvm_args
 
         def on_done(result):
@@ -669,20 +762,22 @@ class MainWindow(QWidget):
                 )
                 self._game_running = True
                 self.status_label.setText("Game running")
+                if self.config.console_mode in ("always", "on_launch"):
+                    self.console_window.show()
                 self.progress_bar.setVisible(False)
-                self.detail_label.setText("")
+                self._clear_details()
                 self._refresh_card_states()
                 if not self.config.keep_launcher_open:
                     self.window().hide()
             except Exception as e:
                 self.progress_bar.setVisible(False)
-                self.detail_label.setText("")
+                self._clear_details()
                 self.status_label.setText(f"Launch failed: {e}")
                 self._refresh_card_states()
 
         def on_error(err):
             self.progress_bar.setVisible(False)
-            self.detail_label.setText("")
+            self._clear_details()
             self.status_label.setText(f"Error: {err}")
             self._refresh_card_states()
 
@@ -700,7 +795,14 @@ class MainWindow(QWidget):
         if dialog.exec():
             self.config = LauncherConfig.load()
             self.api = APIManager(self.config.api_url, verify_ssl=self.config.verify_ssl)
+            self._apply_theme()
+            self._apply_console_mode()
             self._load_project()
+
+    def _apply_theme(self):
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(load_theme(self.config.theme_mode))
 
     def _update_account_button(self):
         name = self.config.account_name or "Login"
@@ -804,3 +906,7 @@ class MainWindow(QWidget):
                 self.starter.stop()
             except Exception:
                 pass
+        try:
+            self.console_window.close()
+        except Exception:
+            pass

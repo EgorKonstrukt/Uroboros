@@ -63,7 +63,16 @@ class LauncherConfig:
     verify_ssl: bool = True
     window_width: int = 1100
     window_height: int = 700
+    window_x: int = -1
+    window_y: int = -1
+    console_width: int = 760
+    console_height: int = 420
+    console_x: int = -1
+    console_y: int = -1
     keep_launcher_open: bool = True
+    console_mode: str = "always"
+    theme_mode: str = "system"
+    modpack_settings: dict = field(default_factory=dict)
 
     def save(self):
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)

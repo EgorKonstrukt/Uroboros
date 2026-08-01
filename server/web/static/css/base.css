@@ -35,6 +35,8 @@
     --success-text: #1b5e20;
     --error-tint: rgba(176,0,32,.06);
     --error-border: rgba(176,0,32,.2);
+    --warning-tint: rgba(239,108,0,.12);
+    --warning-text: #c85400;
 
     --btn-start-hover: #1b5e20;
     --btn-stop-hover: #8f0020;
@@ -92,6 +94,8 @@
     --success-text: #a5d6a7;
     --error-tint: rgba(207,102,121,.12);
     --error-border: rgba(207,102,121,.3);
+    --warning-tint: rgba(255,183,77,.15);
+    --warning-text: #ffb74d;
 
     --btn-start-hover: #4caf50;
     --btn-stop-hover: #e53935;

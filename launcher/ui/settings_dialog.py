@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QSpinBox, QFileDialog, QPushButton, QLabel, QLineEdit, QCheckBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QSpinBox, QFileDialog, QPushButton, QLabel, QLineEdit, QCheckBox, QComboBox
 
 from launcher.config import LauncherConfig
 from launcher.utils.storage import set_work_dir, ensure_dirs
@@ -19,6 +19,7 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
 
         title = QLabel("Settings", self)
+        title.setObjectName("DialogTitle")
         layout.addWidget(title)
 
         form = QFormLayout()
@@ -31,11 +32,11 @@ class SettingsDialog(QDialog):
         form.addRow("Project ID:", self.project_id_input)
 
         self.java_path_input = QLineEdit(self)
-        java_browse = QPushButton("Browse", self)
-        java_browse.clicked.connect(self._browse_java)
+        java_manage = QPushButton("Java Manager", self)
+        java_manage.clicked.connect(self._open_java_manager)
         java_row = QHBoxLayout()
         java_row.addWidget(self.java_path_input)
-        java_row.addWidget(java_browse)
+        java_row.addWidget(java_manage)
         form.addRow("Java Path:", java_row)
 
         self.min_mem = QSpinBox(self)
@@ -64,6 +65,21 @@ class SettingsDialog(QDialog):
         self.verify_ssl = QCheckBox("Verify TLS certificate (uncheck for self-signed)", self)
         form.addRow("TLS:", self.verify_ssl)
 
+        self.console_mode = QComboBox(self)
+        self.console_mode.addItem("Always", "always")
+        self.console_mode.addItem("On game launch", "on_launch")
+        self.console_mode.addItem("Never", "never")
+        form.addRow("Console:", self.console_mode)
+
+        self.theme_mode = QComboBox(self)
+        self.theme_mode.addItem("System", "system")
+        self.theme_mode.addItem("Light", "light")
+        self.theme_mode.addItem("Dark", "dark")
+        form.addRow("Theme:", self.theme_mode)
+
+        self.keep_open = QCheckBox("Keep launcher open after starting the game", self)
+        form.addRow("Launcher:", self.keep_open)
+
         layout.addLayout(form)
         layout.addStretch()
 
@@ -86,14 +102,19 @@ class SettingsDialog(QDialog):
         self.java_args.setText(self.config.java_args)
         self.game_dir_input.setText(self.config.work_dir)
         self.verify_ssl.setChecked(self.config.verify_ssl)
+        idx = self.console_mode.findData(self.config.console_mode)
+        if idx >= 0:
+            self.console_mode.setCurrentIndex(idx)
+        idx = self.theme_mode.findData(self.config.theme_mode)
+        if idx >= 0:
+            self.theme_mode.setCurrentIndex(idx)
+        self.keep_open.setChecked(self.config.keep_launcher_open)
 
-    def _browse_java(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Java Executable", "",
-            "Java (java* java.exe javaw.exe);;All Files (*)"
-        )
-        if path:
-            self.java_path_input.setText(path)
+    def _open_java_manager(self):
+        from launcher.ui.java_manager_dialog import JavaManagerDialog
+        dialog = JavaManagerDialog(self.config, self)
+        dialog.exec()
+        self.java_path_input.setText(self.config.java_path)
 
     def _browse_game_dir(self):
         start = self.game_dir_input.text().strip() or ""
@@ -110,6 +131,9 @@ class SettingsDialog(QDialog):
         self.config.java_args = self.java_args.text()
         self.config.work_dir = self.game_dir_input.text().strip()
         self.config.verify_ssl = self.verify_ssl.isChecked()
+        self.config.console_mode = self.console_mode.currentData()
+        self.config.theme_mode = self.theme_mode.currentData()
+        self.config.keep_launcher_open = self.keep_open.isChecked()
         set_work_dir(self.config.work_dir)
         ensure_dirs()
         self.config.save()

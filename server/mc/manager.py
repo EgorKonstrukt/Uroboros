@@ -24,6 +24,8 @@ class ServerManager:
         self._lock = threading.RLock()
         self._auto_restart = config.auto_restart
         self._stop_requested = False
+        self._stopping = False
+        self._starting = False
         self._output_history: list[str] = []
         self._output_callbacks: list[Callable[[str], None]] = []
 
@@ -89,6 +91,9 @@ class ServerManager:
             if self.is_running():
                 return False
 
+            self.last_error = None
+            self._stop_requested = False
+            self._stopping = False
             self.last_error = self._preflight_check()
             if self.last_error:
                 return False
@@ -123,11 +128,16 @@ class ServerManager:
                 return False
 
             write_pid_for(self.config.id, self.process.pid)
+            self._starting = True
 
             def read_output():
                 try:
                     for line in iter(self.process.stdout.readline, ""):
-                        self._emit_output(line.rstrip("\n"))
+                        line = line.rstrip("\n")
+                        self._emit_output(line)
+                        if self._starting and ("Done (" in line or "For help, type" in line):
+                            with self._lock:
+                                self._starting = False
                 except ValueError:
                     pass
                 if self._auto_restart:
@@ -143,29 +153,106 @@ class ServerManager:
                 exit_code = self.process.returncode
                 clear_pid_for(self.config.id)
                 self.process = None
-        if self._auto_restart and not self._stop_requested and exit_code is not None and exit_code != 0:
+                self._starting = False
+        if self._auto_restart and not self._stop_requested and not self._stopping and exit_code is not None and exit_code != 0:
             import time
             time.sleep(2)
             self.start()
 
-    def stop(self):
+    def _send_stdin(self, command: str):
+        with self._lock:
+            proc = self.process
+        if not proc or not proc.stdin or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write(command + "\n")
+            proc.stdin.flush()
+        except (ValueError, OSError, BrokenPipeError):
+            pass
+
+    def _terminate(self, proc):
+        try:
+            if os.name == "nt":
+                proc.terminate()
+            else:
+                os.kill(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+
+    def _kill(self, proc):
+        try:
+            if os.name == "nt":
+                proc.kill()
+            else:
+                os.kill(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+
+    def stop(self, timeout: float = 30) -> bool:
         self._stop_requested = True
         self.last_error = None
         with self._lock:
-            if self.process and self.process.poll() is None:
-                if os.name == "nt":
-                    self.process.terminate()
-                else:
-                    os.kill(self.process.pid, signal.SIGTERM)
+            self._stopping = True
+            proc = self.process
+            if not proc or proc.poll() is not None:
+                clear_pid_for(self.config.id)
+                self.process = None
+                self._stopping = False
+                return True
+        try:
+            self._send_stdin("stop")
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self._terminate(proc)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self._kill(proc)
                 try:
-                    self.process.wait(timeout=30)
+                    proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    if os.name == "nt":
-                        self.process.kill()
-                    else:
-                        os.kill(self.process.pid, signal.SIGKILL)
+                    pass
+        finally:
+            with self._lock:
+                if self.process is proc:
+                    self.process = None
+                self._stopping = False
+                self._starting = False
             clear_pid_for(self.config.id)
-            self.process = None
+        return True
+
+    def request_stop(self, timeout: float = 30) -> bool:
+        with self._lock:
+            if not self.is_running() or self._stopping:
+                return False
+        threading.Thread(target=self.stop, kwargs={"timeout": timeout}, daemon=True).start()
+        return True
+
+    def is_stopping(self) -> bool:
+        with self._lock:
+            return self._stopping
+
+    def is_starting(self) -> bool:
+        with self._lock:
+            return self._starting
+
+    def request_restart(self, timeout: float = 30) -> bool:
+        with self._lock:
+            if not self.is_running() or self._stopping:
+                return False
+
+        def _worker():
+            self.stop(timeout=timeout)
+            self.start()
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return True
+
+    def reload(self) -> bool:
+        if self.is_stopping() or not self.is_running():
+            return False
+        self._send_stdin("reload")
+        return True
 
     def restart(self, output_callback: Optional[Callable[[str], None]] = None) -> bool:
         self.stop()
@@ -180,6 +267,4 @@ class ServerManager:
         return False
 
     def send_command(self, command: str):
-        if self.process and self.process.stdin:
-            self.process.stdin.write(command + "\n")
-            self.process.stdin.flush()
+        self._send_stdin(command)

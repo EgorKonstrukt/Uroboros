@@ -42,9 +42,10 @@
 .server-btn:hover{border-color:var(--primary);color:var(--primary);background:var(--primary-tint)}
 .server-btn.active{border-color:var(--primary);background:var(--primary);color:var(--on-primary);font-weight:500}
 .server-btn.active .server-dot{background:var(--on-primary)}
-.server-dot{width:7px;height:7px;border-radius:50%;background:var(--dot-off);flex-shrink:0;transition:background .15s}
+.server-dot{width:10px;height:10px;border-radius:50%;background:var(--dot-off);flex-shrink:0;transition:background .15s}
 .dot-on{background:var(--success)}
 .dot-off{background:var(--dot-off)}
+.dot-busy{background:var(--warning)}
 
 /* ===== Tabs (MD2) ===== */
 .server-tab-bar{display:flex;align-items:center;gap:0;padding:0 20px;background:var(--surface);flex-shrink:0;min-height:48px;overflow:hidden;border-bottom:1px solid var(--divider)}
@@ -53,7 +54,7 @@
 .server-tab:hover{color:var(--primary);background:var(--primary-tint)}
 .server-tab.active{color:var(--primary);font-weight:600}
 .server-tab.active::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--primary)}
-.server-tab .server-dot{width:7px;height:7px;flex-shrink:0}
+.server-tab .server-dot{width:10px;height:10px;flex-shrink:0}
 .server-tab-add{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:var(--text-hint);font-size:20px;cursor:pointer;border-radius:var(--radius);transition:all .15s;flex-shrink:0;font-family:var(--font)}
 .server-tab-add:hover{background:var(--primary-tint);color:var(--primary)}
 .topbar-right{display:flex;align-items:center;gap:8px;flex-shrink:0}

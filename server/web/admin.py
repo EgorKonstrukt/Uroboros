@@ -149,6 +149,8 @@ def _instance_to_api(inst: InstanceModel) -> dict:
     running = mgr is not None and mgr.is_running()
     result = instance_model_to_dict(inst)
     result["running"] = running
+    result["stopping"] = bool(mgr and mgr.is_stopping())
+    result["starting"] = bool(mgr and mgr.is_starting())
     result["last_error"] = mgr.last_error if mgr else None
     if running and mgr and mgr.process:
         result["pid"] = mgr.process.pid
@@ -182,6 +184,8 @@ def _get_overview(inst: InstanceModel) -> dict:
 
     d = {
         "running": running,
+        "stopping": bool(mgr and mgr.is_stopping()),
+        "starting": bool(mgr and mgr.is_starting()),
         "last_error": mgr.last_error if mgr else None,
         "players": _parse_players_from_output(mgr),
         "log_lines": len(mgr.get_output(0)) if mgr else 0,
@@ -446,10 +450,12 @@ async def instance_stop(instance_id: str):
     mgr = await get_manager(instance_id)
     if mgr is None:
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    if mgr.is_stopping():
+        return JSONResponse(content={"error": "Server is already stopping"}, status_code=400)
     if not mgr.is_running():
         return JSONResponse(content={"error": "Not running"}, status_code=400)
-    mgr.stop()
-    return {"status": "stopped", "id": instance_id}
+    mgr.request_stop()
+    return {"status": "stopping", "id": instance_id}
 
 
 @router.post("/instances/{instance_id}/restart")
@@ -457,11 +463,28 @@ async def instance_restart(instance_id: str):
     mgr = await get_manager(instance_id)
     if mgr is None:
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
-    if mgr.restart():
-        threading.Thread(target=mgr.process.wait, daemon=True).start()
-        return {"status": "restarted", "pid": mgr.process.pid, "id": instance_id}
+    if mgr.is_stopping():
+        return JSONResponse(content={"error": "Server is already stopping"}, status_code=400)
+    if not mgr.is_running():
+        return JSONResponse(content={"error": "Not running"}, status_code=400)
+    if mgr.request_restart():
+        return {"status": "restarting", "id": instance_id}
     err = mgr.last_error or "Restart failed"
     return JSONResponse(content={"error": err}, status_code=500)
+
+
+@router.post("/instances/{instance_id}/reload")
+async def instance_reload(instance_id: str):
+    mgr = await get_manager(instance_id)
+    if mgr is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    if mgr.is_stopping():
+        return JSONResponse(content={"error": "Server is stopping"}, status_code=400)
+    if not mgr.is_running():
+        return JSONResponse(content={"error": "Not running"}, status_code=400)
+    if mgr.reload():
+        return {"status": "reloaded", "id": instance_id}
+    return JSONResponse(content={"error": "Reload failed"}, status_code=500)
 
 
 @router.post("/instances/{instance_id}/whitelist/sync")

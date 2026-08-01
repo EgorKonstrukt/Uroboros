@@ -102,6 +102,7 @@ async function openServerDetail(id) {
     document.querySelectorAll('.server-sub-panel').forEach(function (p) { p.classList.remove('active'); });
     document.getElementById('serverOverviewView').classList.add('active');
     refreshServerStatus();
+    startStatusPolling();
     startOverview();
 }
 
@@ -136,7 +137,12 @@ async function refreshServerStatus() {
         var r = await apiFetch('/admin/instances/' + currentServerId + '/status');
         if (!r) return;
         var d = await r.json();
-        document.getElementById('serverDetailTitle').textContent = d.name || currentServerId;
+        applyServerStatus(d);
+    } catch (e) {}
+}
+
+function applyServerStatus(d) {
+    document.getElementById('serverDetailTitle').textContent = d.name || currentServerId;
         var modpackLink = document.getElementById('serverDetailModpack');
         if (d.modpack_name && d.modpack_id && d.project_id) {
             modpackLink.style.display = 'inline';
@@ -149,13 +155,39 @@ async function refreshServerStatus() {
         }
         var badge = document.getElementById('serverDetailBadge');
         var pid = document.getElementById('serverDetailPid');
-        document.getElementById('detailBtnStart').disabled = d.running;
-        document.getElementById('detailBtnStop').disabled = !d.running;
-        if (d.running) {
+        var startBtn = document.getElementById('detailBtnStart');
+        var stopBtn = document.getElementById('detailBtnStop');
+        var restartBtn = document.getElementById('detailBtnRestart');
+        var reloadBtn = document.getElementById('detailBtnReload');
+        if (d.stopping) {
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            restartBtn.disabled = true;
+            if (reloadBtn) reloadBtn.disabled = true;
+            badge.textContent = 'STOPPING';
+            badge.className = 'badge badge-stopping';
+            pid.textContent = 'Stopping server...';
+        } else if (d.starting) {
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            restartBtn.disabled = true;
+            if (reloadBtn) reloadBtn.disabled = true;
+            badge.textContent = 'STARTING';
+            badge.className = 'badge badge-starting';
+            pid.textContent = 'Server is booting...';
+        } else if (d.running) {
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            restartBtn.disabled = false;
+            if (reloadBtn) reloadBtn.disabled = false;
             badge.textContent = 'RUNNING';
             badge.className = 'badge badge-running';
             pid.textContent = 'PID: ' + d.pid + (d.uptime_seconds ? ' | Uptime: ' + Math.floor(d.uptime_seconds / 60) + 'm' : '') + (d.memory_mb ? ' | ' + d.memory_mb + 'MB' : '');
         } else {
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            restartBtn.disabled = true;
+            if (reloadBtn) reloadBtn.disabled = true;
             badge.textContent = 'STOPPED';
             badge.className = 'badge badge-stopped';
             pid.textContent = '';
@@ -163,14 +195,20 @@ async function refreshServerStatus() {
         var miniName = document.getElementById('selServerName');
         var miniBadge = document.getElementById('selServerBadge');
         miniName.textContent = d.name || currentServerId;
-        if (d.running) {
+        if (d.stopping) {
+            miniBadge.textContent = 'STOPPING';
+            miniBadge.className = 'badge badge-stopping';
+        } else if (d.starting) {
+            miniBadge.textContent = 'STARTING';
+            miniBadge.className = 'badge badge-starting';
+        } else if (d.running) {
             miniBadge.textContent = 'RUNNING';
             miniBadge.className = 'badge badge-running';
         } else {
             miniBadge.textContent = 'STOPPED';
             miniBadge.className = 'badge badge-stopped';
         }
-    } catch (e) {}
+    if (currentServerId) updateServerDot(currentServerId, d);
 }
 
 async function serverAction(action) {
@@ -181,10 +219,21 @@ async function serverAction(action) {
         var d = await r.json();
         refreshServerStatus();
         if (d.error) { toast(d.error, 'error'); }
-        else if (action !== 'stop') {
-            toast('Server ' + action + ' (PID: ' + (d.pid || '?') + ')', 'success');
-            addServerLine('[SERVER] ' + action.toUpperCase() + ' (PID: ' + (d.pid || '?') + ')', 'system');
-        } else { toast('Server stopped', 'info'); }
+        else if (action === 'start') {
+            toast('Server started (PID: ' + (d.pid || '?') + ')', 'success');
+            addServerLine('[SERVER] STARTED (PID: ' + (d.pid || '?') + ')', 'system');
+        } else if (action === 'stop') {
+            toast('Server is stopping gracefully...', 'info');
+            addServerLine('[SERVER] STOP requested (graceful shutdown)', 'system');
+        } else if (action === 'restart') {
+            toast('Server is restarting...', 'info');
+            addServerLine('[SERVER] RESTART requested', 'system');
+        } else if (action === 'reload') {
+            toast('Server reloading (reload command sent)', 'success');
+            addServerLine('[SERVER] RELOAD requested', 'system');
+        } else {
+            toast('Server ' + action, 'info');
+        }
     } catch (e) { toast('Failed: ' + e.message, 'error'); }
 }
 

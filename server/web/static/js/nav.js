@@ -26,6 +26,7 @@ function switchTab(name) {
 function clearServerPolling() {
     if (serverPollTimer) { clearInterval(serverPollTimer); serverPollTimer = null; }
     if (typeof stopOverview === 'function') stopOverview();
+    stopStatusPolling();
 }
 
 function selectServer(id) {
@@ -52,6 +53,56 @@ function renderServerNav() {
             renderServerTabs(servers);
         });
     });
+}
+
+function serverDotClass(s) {
+    if (s.starting || s.stopping) return 'dot-busy';
+    return s.running ? 'dot-on' : 'dot-off';
+}
+
+function updateServerDot(id, s) {
+    var cls = 'server-dot ' + serverDotClass(s);
+    var sel = '.sidebar-server-item[data-server="' + id + '"] .server-dot';
+    var sidebarDot = document.querySelector(sel);
+    if (sidebarDot) sidebarDot.className = cls;
+    var tabSel = '.server-tab[data-server="' + id + '"] .server-dot';
+    var tabDot = document.querySelector(tabSel);
+    if (tabDot) tabDot.className = cls;
+}
+
+function updateAllDots(servers) {
+    for (var i = 0; i < servers.length; i++) {
+        updateServerDot(servers[i].id, servers[i]);
+    }
+}
+
+var statusPollTimer = null;
+
+function startStatusPolling() {
+    stopStatusPolling();
+    statusPollTimer = setInterval(pollServerStates, 2500);
+    pollServerStates();
+}
+
+function stopStatusPolling() {
+    if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
+}
+
+async function pollServerStates() {
+    try {
+        var r = await apiFetch('/admin/instances');
+        if (!r) return;
+        var servers = await r.json();
+        updateAllDots(servers);
+        if (currentServerId) {
+            for (var i = 0; i < servers.length; i++) {
+                if (servers[i].id === currentServerId) {
+                    if (typeof applyServerStatus === 'function') applyServerStatus(servers[i]);
+                    break;
+                }
+            }
+        }
+    } catch (e) {}
 }
 
 function renderSidebarServers(servers) {
@@ -97,7 +148,7 @@ function renderSidebarServers(servers) {
             btn.setAttribute('data-server', s.id);
             btn.onclick = (function (id) { return function () { selectServer(id); }; })(s.id);
             var modpackTag = s.modpack_name ? '<span class="tag tag-file" style="margin-left:6px;font-size:10px">' + esc(s.modpack_name) + '</span>' : '';
-            btn.innerHTML = '<span class="server-dot ' + (s.running ? 'dot-on' : 'dot-off') + '"></span>' + esc(s.name || s.id) + modpackTag;
+            btn.innerHTML = '<span class="server-dot ' + serverDotClass(s) + '"></span>' + esc(s.name || s.id) + modpackTag;
             children.appendChild(btn);
         }
         group.appendChild(children);
@@ -146,7 +197,7 @@ function renderServerTabs(servers) {
         tab.className = 'server-tab' + (currentServerId === s.id ? ' active' : '');
         tab.setAttribute('data-server', s.id);
         tab.onclick = function (id) { return function () { selectServer(id); }; }(s.id);
-        tab.innerHTML = '<span class="server-dot ' + (s.running ? 'dot-on' : 'dot-off') + '"></span>' + esc(s.name || s.id);
+        tab.innerHTML = '<span class="server-dot ' + serverDotClass(s) + '"></span>' + esc(s.name || s.id);
         tabs.appendChild(tab);
     }
 }

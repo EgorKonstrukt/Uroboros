@@ -18,6 +18,8 @@ from launcher.utils.progress import FileProgress, CancelledError
 
 ADOPTIUM_API = "https://api.adoptium.net/v3/assets/latest/{version}/hotspot"
 
+INSTALLABLE_VERSIONS = [8, 11, 16, 17, 21, 25]
+
 
 class JavaManager:
     @staticmethod
@@ -36,6 +38,55 @@ class JavaManager:
         if machine in ("aarch64", "arm64"):
             return "arm64"
         return "x64"
+
+    @staticmethod
+    def get_java_major_version(java_path: str) -> int:
+        try:
+            out = subprocess.check_output(
+                [java_path, "-version"], stderr=subprocess.STDOUT, timeout=10
+            ).decode(errors="replace")
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, OSError):
+            return 0
+        m = re.search(r'version "([^"]+)"', out)
+        if not m:
+            return 0
+        ver = m.group(1)
+        if ver.startswith("1."):
+            try:
+                return int(ver.split(".")[1])
+            except (ValueError, IndexError):
+                return 0
+        try:
+            return int(ver.split(".")[0])
+        except (ValueError, IndexError):
+            return 0
+
+    @staticmethod
+    def matches_version(java_path: str, version: int) -> bool:
+        if not version:
+            return True
+        return JavaManager.get_java_major_version(java_path) == version
+
+    @staticmethod
+    def java_required_for_mc(mc_version: str) -> int:
+        try:
+            parts = re.findall(r"\d+", mc_version or "")
+            major = int(parts[0]) if len(parts) > 0 else 0
+            minor = int(parts[1]) if len(parts) > 1 else 0
+            patch = int(parts[2]) if len(parts) > 2 else 0
+        except (ValueError, IndexError):
+            return 17
+        if major > 1:
+            return 21
+        if major == 0:
+            return 17
+        if (minor, patch) >= (20, 5):
+            return 21
+        if (minor, patch) >= (18, 0):
+            return 17
+        if (minor, patch) >= (17, 0):
+            return 16
+        return 8
 
     def get_available_versions(self, java_version: int = 17) -> list:
         try:
@@ -73,46 +124,125 @@ class JavaManager:
                     dirs.append(p)
         return dirs
 
-    def find_java(self, version: int = 17) -> Optional[str]:
-        candidates = []
+    def _discover_java_candidates(self) -> list:
+        found = []
         system_java = shutil.which("java")
         if system_java:
-            candidates.append(Path(system_java))
+            found.append(Path(system_java))
         java_dir = get_java_dir()
         if java_dir.exists():
-            candidates.append(java_dir)
-        candidates.extend(self._system_java_dirs())
-        for base in candidates:
+            found.append(java_dir)
+        found.extend(self._system_java_dirs())
+
+        by_dir = {}
+        for base in found:
             if not base.exists():
                 continue
             if base.is_file() and base.name in ("java", "java.exe", "javaw.exe"):
-                if self.matches_version(str(base), version):
-                    return str(base)
-                continue
-            if sys.platform == "win32":
-                javas = list(base.rglob("java.exe")) + list(base.rglob("javaw.exe"))
+                cands = [base]
+            elif sys.platform == "win32":
+                cands = list(base.rglob("java.exe")) + list(base.rglob("javaw.exe"))
             else:
-                javas = list(base.rglob("java"))
-            for j in javas:
-                if j.is_file() and self.matches_version(str(j), version):
-                    return str(j)
-        return None
+                cands = list(base.rglob("java"))
+            for j in cands:
+                j = Path(j)
+                if not j.is_file():
+                    continue
+                dkey = os.path.normcase(str(j.parent))
+                entry = by_dir.get(dkey)
+                if entry is None or j.name == "java.exe":
+                    by_dir[dkey] = j
+        return list(by_dir.values())
 
-    @staticmethod
-    def matches_version(java_path: str, version: int) -> bool:
+    def find_java(self, version: int = 17) -> Optional[str]:
+        version = version or 0
+        javas = self._discover_java_candidates()
+        exact = None
+        for j in javas:
+            v = self.get_java_major_version(str(j))
+            if version == 0 or v == version:
+                exact = j
+                break
+        if exact is None and version >= 16:
+            for j in javas:
+                if self.get_java_major_version(str(j)) >= version:
+                    exact = j
+                    break
+        return str(exact) if exact else None
+
+    def list_managed(self) -> list:
+        return [e for e in self.list_all() if e["managed"]]
+
+    def _is_managed(self, java_path) -> bool:
         try:
-            out = subprocess.check_output(
-                [java_path, "-version"], stderr=subprocess.STDOUT, timeout=10
-            ).decode(errors="replace")
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, OSError):
+            p = Path(java_path).resolve()
+            runtime = get_java_dir().resolve()
+            return runtime in p.parents
+        except OSError:
             return False
-        if not version:
-            return True
-        if f'version "1.{version}' in out:
-            return True
-        if re.search(rf'version "{version}(\.|_)', out):
+
+    def list_all(self) -> list:
+        result = []
+        seen = set()
+        for j in self._discover_java_candidates():
+            j = Path(j)
+            key = os.path.normcase(str(j))
+            if key in seen:
+                continue
+            seen.add(key)
+            version = self.get_java_major_version(str(j))
+            managed = self._is_managed(str(j))
+            result.append({
+                "version": version,
+                "path": str(j),
+                "managed": managed,
+                "dir": str(get_java_dir() / f"jdk-{version}") if managed else "",
+            })
+        result.sort(key=lambda e: e["version"], reverse=True)
+        return result
+
+    def remove_managed(self, entry: dict) -> bool:
+        d = Path(entry.get("dir", ""))
+        if d.exists() and d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
             return True
         return False
+
+    def ensure_java(self, required: int = 0, progress_callback=None, should_cancel=None) -> Optional[str]:
+        java = self.find_java(required) if required else self.find_java()
+        if not java and required:
+            java = self.download_java(required, progress_callback, should_cancel)
+        elif not java:
+            java = self.download_java(17, progress_callback, should_cancel)
+        return java
+
+    def _pick_asset(self, assets: list) -> Optional[dict]:
+        os_name = self.get_os()
+        arch = self.get_arch()
+        for a in assets:
+            b = a.get("binary", {})
+            pkg = b.get("package", {})
+            if not pkg.get("link"):
+                continue
+            if (b.get("os", "").lower() == os_name
+                    and b.get("architecture", "").lower() == arch
+                    and b.get("image_type", "").lower() == "jdk"):
+                return a
+        for a in assets:
+            b = a.get("binary", {})
+            pkg = b.get("package", {})
+            if not pkg.get("link"):
+                continue
+            if b.get("os", "").lower() == os_name and b.get("architecture", "").lower() == arch:
+                return a
+        for a in assets:
+            b = a.get("binary", {})
+            pkg = b.get("package", {})
+            if not pkg.get("link"):
+                continue
+            if b.get("os", "").lower() == os_name:
+                return a
+        return None
 
     def download_java(self, java_version: int = 17, progress_callback=None, should_cancel=None) -> Optional[str]:
         if should_cancel and should_cancel():
@@ -121,21 +251,7 @@ class JavaManager:
         if not assets:
             return None
 
-        os_name = self.get_os()
-        arch = self.get_arch()
-
-        asset = None
-        for a in assets:
-            bp = a.get("binary", {}).get("package", {})
-            if bp.get("os", "").lower() == os_name and bp.get("architecture", "").lower() == arch:
-                asset = a
-                break
-        if not asset:
-            for a in assets:
-                bp = a.get("binary", {}).get("package", {})
-                if bp.get("os", "").lower() == os_name:
-                    asset = a
-                    break
+        asset = self._pick_asset(assets)
         if not asset:
             return None
 

@@ -59,6 +59,8 @@ a.btn{display:inline-flex;align-items:center;color:var(--primary)}
 .ov-tile-value{font-size:22px;font-weight:500;color:var(--on-surface);font-family:var(--mono);line-height:1.2}
 .ov-tile-value.running{color:var(--success)}
 .ov-tile-value.stopped{color:var(--text-hint)}
+.ov-tile-value.starting{color:var(--primary)}
+.ov-tile-value.stopping{color:var(--warning)}
 .ov-tile-sub{font-size:11px;color:var(--text-secondary);margin-top:3px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .overview-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}

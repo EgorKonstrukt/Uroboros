@@ -24,7 +24,7 @@ class LoginDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
 
         title = QLabel("Log in to your account", self)
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #cdd6f4;")
+        title.setObjectName("DialogTitle")
         layout.addWidget(title)
 
         form = QFormLayout()
@@ -40,8 +40,8 @@ class LoginDialog(QDialog):
         layout.addLayout(form)
 
         self.error_label = QLabel("", self)
+        self.error_label.setObjectName("DialogError")
         self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet("color: #f38ba8; font-size: 12px;")
         layout.addWidget(self.error_label)
 
         self.login_btn = QPushButton("Log in", self)
