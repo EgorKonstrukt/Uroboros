@@ -1,5 +1,7 @@
 import threading
 import re
+import os
+import stat
 import time
 import typing
 import json
@@ -13,8 +15,9 @@ from datetime import datetime
 from typing import get_type_hints, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, File, Form, UploadFile
+from fastapi import APIRouter, Depends, Request, File, Form, UploadFile, Body
 from fastapi.responses import JSONResponse, HTMLResponse
+from starlette.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.config import ServerConfig, SERVER_DIR
@@ -419,18 +422,6 @@ async def instance_start(instance_id: str):
     inst = await get_instance(instance_id)
     if inst is None:
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
-    # Auto-install modpack files before starting
-    if inst.modpack_id:
-        mp_dir = _modpack_dir(inst.project_id or "", inst.modpack_id)
-        if mp_dir.exists():
-            server_dir = Path(inst.server_dir)
-            if server_dir.exists():
-                for entry in mp_dir.rglob("*"):
-                    if entry.is_file() and entry.name != "files.json":
-                        rel = entry.relative_to(mp_dir)
-                        dest = server_dir / rel
-                        dest.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(entry, dest)
     mgr = await get_manager(instance_id)
     if mgr is None:
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
@@ -497,31 +488,6 @@ async def instance_whitelist_sync(instance_id: str):
     if mgr and mgr.is_running():
         mgr.send_command("whitelist reload")
     return result
-
-
-@router.post("/instances/{instance_id}/install-modpack")
-async def install_instance_modpack(instance_id: str):
-    inst = await get_instance(instance_id)
-    if inst is None:
-        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
-    if not inst.modpack_id:
-        return JSONResponse(content={"error": "No modpack linked to this server"}, status_code=400)
-    mp_dir = _modpack_dir(inst.project_id or "", inst.modpack_id)
-    if not mp_dir.exists():
-        return JSONResponse(content={"error": "Modpack directory not found on server"}, status_code=404)
-    server_dir = Path(inst.server_dir)
-    if not server_dir.exists():
-        return JSONResponse(content={"error": "Server directory not found"}, status_code=404)
-    all_files = [e for e in mp_dir.rglob("*") if e.is_file() and e.name != "files.json"]
-    total = len(all_files)
-    copied = 0
-    for idx, entry in enumerate(all_files):
-        rel = entry.relative_to(mp_dir)
-        dest = server_dir / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(entry, dest)
-        copied += 1
-    return {"status": "ok", "files_copied": copied, "file_count": total, "modpack": inst.modpack_id}
 
 
 @router.get("/instances/{instance_id}/output")
@@ -712,6 +678,7 @@ async def write_file(instance_id: str, body: dict):
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         content = body.get("content", "")
+        _make_writable(target)
         target.write_text(content, encoding="utf-8")
         return {"status": "saved", "path": str(target)}
     except Exception as e:
@@ -719,7 +686,7 @@ async def write_file(instance_id: str, body: dict):
 
 
 @router.post("/instances/{instance_id}/files/upload")
-async def upload_file(instance_id: str, file: UploadFile = File(...), path: str = Form("")):
+async def upload_file(instance_id: str, file: UploadFile = File(...), path: str = Form(""), relpath: str = Form("")):
     inst = await get_instance(instance_id)
     if inst is None:
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
@@ -731,9 +698,14 @@ async def upload_file(instance_id: str, file: UploadFile = File(...), path: str 
             return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     if not target.exists() or not target.is_dir():
         return JSONResponse(content={"error": "Directory not found"}, status_code=404)
-    file_path = target / file.filename
+    rel = (relpath or file.filename or "").replace("\\", "/")
+    file_path = (target / rel).resolve()
+    if not str(file_path).startswith(str(base)):
+        return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     try:
         content = await file.read()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        _make_writable(file_path)
         file_path.write_bytes(content)
         return {"status": "uploaded", "path": str(file_path), "size": len(content)}
     except Exception as e:
@@ -786,6 +758,238 @@ async def download_file(instance_id: str, path: str = ""):
         except OSError:
             pass
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+# ── Files: advanced operations (instances) ──
+
+async def _instance_base_dir(instance_id: str) -> Path | None:
+    inst = await get_instance(instance_id)
+    if inst is None:
+        return None
+    return Path(inst.server_dir).resolve()
+
+
+def _unique_dest(dest_dir: Path, name: str) -> Path:
+    candidate = dest_dir / name
+    if not candidate.exists():
+        return candidate
+    stem = Path(name).stem
+    suffix = Path(name).suffix
+    i = 1
+    while True:
+        candidate = dest_dir / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+def _make_writable(path: Path):
+    if not path.exists():
+        return
+    try:
+        os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
+    except OSError:
+        pass
+
+
+def _clear_readonly(path: Path):
+    if path.is_dir():
+        for entry in path.rglob("*"):
+            _make_writable(entry)
+    else:
+        _make_writable(path)
+
+
+def _remove_path(path: Path):
+    _clear_readonly(path)
+    if path.is_file():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
+
+
+@router.delete("/instances/{instance_id}/files")
+async def delete_instance_files(instance_id: str, body: dict):
+    raw = body.get("paths")
+    if isinstance(raw, list):
+        paths = raw
+    else:
+        single = (body.get("path") or "").strip()
+        paths = [single] if single else []
+    if not paths:
+        return JSONResponse(content={"error": "path or paths is required"}, status_code=400)
+    deleted = 0
+    errors = []
+    for p in paths:
+        target = await _resolve_file_path(instance_id, p)
+        if target is None or not target.exists():
+            errors.append({"path": p, "error": "not found or access denied"})
+            continue
+        try:
+            _remove_path(target)
+            deleted += 1
+        except Exception as e:
+            errors.append({"path": p, "error": str(e)})
+    return {"status": "deleted", "deleted": deleted, "errors": errors}
+
+
+@router.post("/instances/{instance_id}/files/mkdir")
+async def create_instance_folder(instance_id: str, body: dict):
+    base = await _instance_base_dir(instance_id)
+    if base is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    name = (body.get("name") or "").strip()
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return JSONResponse(content={"error": "Invalid folder name"}, status_code=400)
+    rel = (body.get("path") or "").strip().strip("/")
+    target = await _resolve_file_path(instance_id, f"{rel}/{name}" if rel else name)
+    if target is None:
+        return JSONResponse(content={"error": "Access denied"}, status_code=403)
+    if target.exists():
+        return JSONResponse(content={"error": "Already exists"}, status_code=409)
+    try:
+        target.mkdir(parents=True, exist_ok=False)
+        return {"status": "created", "count": 1, "path": (rel + "/" + name) if rel else name}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@router.post("/instances/{instance_id}/files/rename")
+async def rename_instance_file(instance_id: str, body: dict):
+    path = (body.get("path") or "").strip().strip("/")
+    new_name = (body.get("new_name") or "").strip()
+    if not path:
+        return JSONResponse(content={"error": "path is required"}, status_code=400)
+    if not new_name or "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+        return JSONResponse(content={"error": "Invalid name"}, status_code=400)
+    target = await _resolve_file_path(instance_id, path)
+    if target is None or not target.exists():
+        return JSONResponse(content={"error": "Not found or access denied"}, status_code=404)
+    dest = target.parent / new_name
+    if dest.exists():
+        return JSONResponse(content={"error": "Target already exists"}, status_code=409)
+    try:
+        target.rename(dest)
+        return {"status": "renamed", "count": 1, "path": path, "new_name": new_name}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+async def _batch_move_copy(instance_id: str, body: dict, action: str):
+    base = await _instance_base_dir(instance_id)
+    if base is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    paths = body.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return JSONResponse(content={"error": "paths is required"}, status_code=400)
+    dest = (body.get("destination") or "").strip().strip("/")
+    dest_dir = await _resolve_file_path(instance_id, dest)
+    if dest_dir is None or not dest_dir.is_dir():
+        return JSONResponse(content={"error": "Destination directory not found"}, status_code=404)
+    done = 0
+    errors = []
+    for p in paths:
+        src = await _resolve_file_path(instance_id, p)
+        if src is None or not src.exists():
+            errors.append({"path": p, "error": "not found or access denied"})
+            continue
+        if str(src.resolve()) == str(dest_dir.resolve()) or str(dest_dir.resolve()).startswith(str(src.resolve()) + os.sep):
+            errors.append({"path": p, "error": "cannot move/copy into itself"})
+            continue
+        target = _unique_dest(dest_dir, src.name)
+        try:
+            if action == "move":
+                shutil.move(str(src), str(target))
+            elif src.is_dir():
+                shutil.copytree(str(src), str(target))
+            else:
+                shutil.copy2(str(src), str(target))
+            done += 1
+        except Exception as e:
+            errors.append({"path": p, "error": str(e)})
+    return {"status": action, "count": done, "errors": errors}
+
+
+@router.post("/instances/{instance_id}/files/move")
+async def move_instance_files(instance_id: str, body: dict):
+    return await _batch_move_copy(instance_id, body, "move")
+
+
+@router.post("/instances/{instance_id}/files/copy")
+async def copy_instance_files(instance_id: str, body: dict):
+    return await _batch_move_copy(instance_id, body, "copy")
+
+
+@router.post("/instances/{instance_id}/files/zip")
+async def zip_instance_files(instance_id: str, body: dict):
+    paths = body.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return JSONResponse(content={"error": "paths is required"}, status_code=400)
+    base = await _instance_base_dir(instance_id)
+    if base is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    import tempfile
+    import zipfile
+    fd, tmp_path = tempfile.mkstemp(prefix="uroboros_zip_", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in paths:
+                src = await _resolve_file_path(instance_id, p)
+                if src is None or not src.exists():
+                    continue
+                if src.is_file():
+                    zf.write(src, p.lstrip("/"))
+                else:
+                    for root, dirs, files in os.walk(src):
+                        for name in files:
+                            fpath = Path(root) / name
+                            arc = str(fpath.relative_to(base)).replace("\\", "/")
+                            try:
+                                zf.write(fpath, arc)
+                            except OSError:
+                                continue
+        return FileResponse(tmp_path, filename="selection.zip", background=lambda: os.remove(tmp_path))
+    except Exception as e:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@router.post("/instances/{instance_id}/files/upload-batch")
+async def upload_instance_files_batch(instance_id: str, request: Request, path: str = Form("")):
+    inst = await get_instance(instance_id)
+    if inst is None:
+        return JSONResponse(content={"error": "Instance not found"}, status_code=404)
+    base = Path(inst.server_dir).resolve()
+    target_dir = base
+    if path:
+        target_dir = (base / path).resolve()
+        if not str(target_dir).startswith(str(base)):
+            return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    form = await request.form()
+    files = form.getlist("file")
+    relpaths = form.getlist("relpath")
+    uploaded = 0
+    errors = []
+    for i, f in enumerate(files):
+        rel = (relpaths[i] if i < len(relpaths) and relpaths[i] else (f.filename or "")).replace("\\", "/").lstrip("/")
+        file_path = (target_dir / rel).resolve()
+        if not str(file_path).startswith(str(base)):
+            errors.append({"relpath": rel, "error": "path traversal denied"})
+            continue
+        try:
+            content = await f.read()
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            _make_writable(file_path)
+            file_path.write_bytes(content)
+            uploaded += 1
+        except Exception as e:
+            errors.append({"relpath": rel, "error": str(e)})
+    return {"status": "uploaded", "uploaded": uploaded, "errors": errors}
 
 
 # ── Java management ──
@@ -971,7 +1175,7 @@ async def delete_modpack(project_id: str, modpack_id: str):
         await session.commit()
     mp_dir = _modpack_dir(project_id, modpack_id)
     if mp_dir.exists():
-        shutil.rmtree(mp_dir, ignore_errors=True)
+        _remove_path(mp_dir)
     return {"status": "deleted"}
 
 
@@ -1141,10 +1345,7 @@ async def extract_modpack_archive(
             for child in list(mp_dir.iterdir()):
                 if child.name == "files.json":
                     continue
-                if child.is_dir():
-                    shutil.rmtree(child, ignore_errors=True)
-                else:
-                    child.unlink()
+                _remove_path(child)
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             archive_path = tmp_path / file.filename
@@ -1165,6 +1366,7 @@ async def extract_modpack_archive(
                         continue
                     dest = mp_dir / rel
                     dest.parent.mkdir(parents=True, exist_ok=True)
+                    _make_writable(dest)
                     shutil.copy2(entry, dest)
                     total += 1
         _update_files_hash(project_id, modpack_id)
@@ -1180,9 +1382,11 @@ async def upload_modpack_file(
     project_id: str, modpack_id: str,
     file: UploadFile = File(...),
     path: str = Form(""),
+    relpath: str = Form(""),
 ):
     mp_dir = _modpack_dir(project_id, modpack_id)
     mp_dir.mkdir(parents=True, exist_ok=True)
+    base = mp_dir.resolve()
     target_dir = mp_dir
     if path:
         resolved = await _resolve_mp_path(project_id, modpack_id, path)
@@ -1191,9 +1395,14 @@ async def upload_modpack_file(
         if not resolved.exists():
             resolved.mkdir(parents=True, exist_ok=True)
         target_dir = resolved
-    file_path = target_dir / file.filename
+    rel = (relpath or file.filename or "").replace("\\", "/")
+    file_path = (target_dir / rel).resolve()
+    if not str(file_path).startswith(str(base)):
+        return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     try:
         content = await file.read()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        _make_writable(file_path)
         file_path.write_bytes(content)
         _update_files_hash(project_id, modpack_id)
         return {"status": "uploaded", "path": str(file_path), "size": len(content)}
@@ -1202,23 +1411,196 @@ async def upload_modpack_file(
 
 
 @router.delete("/projects/{project_id}/modpacks/{modpack_id}/files")
-async def delete_modpack_file(project_id: str, modpack_id: str, path: str = ""):
-    if not path:
-        return JSONResponse(content={"error": "path is required"}, status_code=400)
-    target = await _resolve_mp_path(project_id, modpack_id, path)
-    if target is None:
-        return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
-    if not target.exists():
-        return JSONResponse(content={"error": "Not found"}, status_code=404)
-    try:
-        if target.is_file():
-            target.unlink()
-        elif target.is_dir():
-            shutil.rmtree(target)
+async def delete_modpack_file(project_id: str, modpack_id: str, path: str = "", body: dict | None = Body(default=None)):
+    if body and isinstance(body.get("paths"), list):
+        raw = body["paths"]
+    elif path:
+        raw = [path]
+    elif body and body.get("path"):
+        raw = [body["path"]]
+    else:
+        raw = []
+    if not raw:
+        return JSONResponse(content={"error": "path or paths is required"}, status_code=400)
+    deleted = 0
+    errors = []
+    for p in raw:
+        target = await _resolve_mp_path(project_id, modpack_id, p)
+        if target is None or not target.exists():
+            errors.append({"path": p, "error": "not found or access denied"})
+            continue
+        try:
+            _remove_path(target)
+            deleted += 1
+        except Exception as e:
+            errors.append({"path": p, "error": str(e)})
+    if deleted or not errors:
         _update_files_hash(project_id, modpack_id)
-        return {"status": "deleted"}
+    return {"status": "deleted", "deleted": deleted, "errors": errors}
+
+
+# ── Modpack file manager: advanced operations ──
+
+
+@router.post("/projects/{project_id}/modpacks/{modpack_id}/files/mkdir")
+async def create_modpack_folder(project_id: str, modpack_id: str, body: dict):
+    name = (body.get("name") or "").strip()
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return JSONResponse(content={"error": "Invalid folder name"}, status_code=400)
+    rel = (body.get("path") or "").strip().strip("/")
+    target = await _resolve_mp_path(project_id, modpack_id, f"{rel}/{name}" if rel else name)
+    if target is None:
+        return JSONResponse(content={"error": "Access denied"}, status_code=403)
+    if target.exists():
+        return JSONResponse(content={"error": "Already exists"}, status_code=409)
+    try:
+        target.mkdir(parents=True, exist_ok=False)
+        return {"status": "created", "count": 1, "path": (rel + "/" + name) if rel else name}
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@router.post("/projects/{project_id}/modpacks/{modpack_id}/files/rename")
+async def rename_modpack_file(project_id: str, modpack_id: str, body: dict):
+    path = (body.get("path") or "").strip().strip("/")
+    new_name = (body.get("new_name") or "").strip()
+    if not path:
+        return JSONResponse(content={"error": "path is required"}, status_code=400)
+    if not new_name or "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+        return JSONResponse(content={"error": "Invalid name"}, status_code=400)
+    target = await _resolve_mp_path(project_id, modpack_id, path)
+    if target is None or not target.exists():
+        return JSONResponse(content={"error": "Not found or access denied"}, status_code=404)
+    dest = target.parent / new_name
+    if dest.exists():
+        return JSONResponse(content={"error": "Target already exists"}, status_code=409)
+    try:
+        target.rename(dest)
+        _update_files_hash(project_id, modpack_id)
+        return {"status": "renamed", "count": 1, "path": path, "new_name": new_name}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+async def _modpack_batch_move_copy(project_id: str, modpack_id: str, body: dict, action: str):
+    mp_dir = _modpack_dir(project_id, modpack_id)
+    if not mp_dir.exists():
+        return JSONResponse(content={"error": "Modpack not found"}, status_code=404)
+    base = mp_dir.resolve()
+    paths = body.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return JSONResponse(content={"error": "paths is required"}, status_code=400)
+    dest = (body.get("destination") or "").strip().strip("/")
+    dest_dir = await _resolve_mp_path(project_id, modpack_id, dest)
+    if dest_dir is None or not dest_dir.is_dir():
+        return JSONResponse(content={"error": "Destination directory not found"}, status_code=404)
+    done = 0
+    errors = []
+    for p in paths:
+        src = await _resolve_mp_path(project_id, modpack_id, p)
+        if src is None or not src.exists():
+            errors.append({"path": p, "error": "not found or access denied"})
+            continue
+        if str(src.resolve()) == str(dest_dir.resolve()) or str(dest_dir.resolve()).startswith(str(src.resolve()) + os.sep):
+            errors.append({"path": p, "error": "cannot move/copy into itself"})
+            continue
+        target = _unique_dest(dest_dir, src.name)
+        try:
+            if action == "move":
+                shutil.move(str(src), str(target))
+            elif src.is_dir():
+                shutil.copytree(str(src), str(target))
+            else:
+                shutil.copy2(str(src), str(target))
+            done += 1
+        except Exception as e:
+            errors.append({"path": p, "error": str(e)})
+    _update_files_hash(project_id, modpack_id)
+    return {"status": action, "count": done, "errors": errors}
+
+
+@router.post("/projects/{project_id}/modpacks/{modpack_id}/files/move")
+async def move_modpack_files(project_id: str, modpack_id: str, body: dict):
+    return await _modpack_batch_move_copy(project_id, modpack_id, body, "move")
+
+
+@router.post("/projects/{project_id}/modpacks/{modpack_id}/files/copy")
+async def copy_modpack_files(project_id: str, modpack_id: str, body: dict):
+    return await _modpack_batch_move_copy(project_id, modpack_id, body, "copy")
+
+
+@router.post("/projects/{project_id}/modpacks/{modpack_id}/files/zip")
+async def zip_modpack_files(project_id: str, modpack_id: str, body: dict):
+    paths = body.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return JSONResponse(content={"error": "paths is required"}, status_code=400)
+    mp_dir = _modpack_dir(project_id, modpack_id)
+    if not mp_dir.exists():
+        return JSONResponse(content={"error": "Modpack not found"}, status_code=404)
+    base = mp_dir.resolve()
+    import tempfile
+    import zipfile
+    fd, tmp_path = tempfile.mkstemp(prefix="uroboros_zip_", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in paths:
+                src = await _resolve_mp_path(project_id, modpack_id, p)
+                if src is None or not src.exists():
+                    continue
+                if src.is_file():
+                    zf.write(src, p.lstrip("/"))
+                else:
+                    for root, dirs, files in os.walk(src):
+                        for name in files:
+                            fpath = Path(root) / name
+                            arc = str(fpath.relative_to(base)).replace("\\", "/")
+                            try:
+                                zf.write(fpath, arc)
+                            except OSError:
+                                continue
+        return FileResponse(tmp_path, filename="selection.zip", background=lambda: os.remove(tmp_path))
+    except Exception as e:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@router.post("/projects/{project_id}/modpacks/{modpack_id}/files/upload-batch")
+async def upload_modpack_files_batch(project_id: str, modpack_id: str, request: Request, path: str = Form("")):
+    mp_dir = _modpack_dir(project_id, modpack_id)
+    mp_dir.mkdir(parents=True, exist_ok=True)
+    base = mp_dir.resolve()
+    target_dir = mp_dir
+    if path:
+        resolved = await _resolve_mp_path(project_id, modpack_id, path)
+        if resolved is None:
+            return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
+        resolved.mkdir(parents=True, exist_ok=True)
+        target_dir = resolved
+    form = await request.form()
+    files = form.getlist("file")
+    relpaths = form.getlist("relpath")
+    uploaded = 0
+    errors = []
+    for i, f in enumerate(files):
+        rel = (relpaths[i] if i < len(relpaths) and relpaths[i] else (f.filename or "")).replace("\\", "/").lstrip("/")
+        file_path = (target_dir / rel).resolve()
+        if not str(file_path).startswith(str(base)):
+            errors.append({"relpath": rel, "error": "path traversal denied"})
+            continue
+        try:
+            content = await f.read()
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            _make_writable(file_path)
+            file_path.write_bytes(content)
+            uploaded += 1
+        except Exception as e:
+            errors.append({"relpath": rel, "error": str(e)})
+    _update_files_hash(project_id, modpack_id)
+    return {"status": "uploaded", "uploaded": uploaded, "errors": errors}
 
 
 # ── Async import task tracking ──

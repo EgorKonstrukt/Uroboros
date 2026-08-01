@@ -358,6 +358,15 @@ async def launcher_sync_project(project_id: str):
         }
 
 
+@launcher_router.get("/projects/{project_id}/modpacks/{modpack_id}")
+async def launcher_get_modpack(project_id: str, modpack_id: str):
+    async with get_session() as session:
+        m = await session.get(ModpackModel, (modpack_id, project_id))
+        if not m:
+            return JSONResponse(content={"error": "Modpack not found"}, status_code=404)
+        return await _modpack_model_to_dict(m)
+
+
 @launcher_router.get("/projects/{project_id}/modpacks/{modpack_id}/files")
 async def launcher_list_modpack_files(project_id: str, modpack_id: str):
     mp_dir = _modpack_dir(project_id, modpack_id)

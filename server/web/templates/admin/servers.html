@@ -10,7 +10,6 @@
               <button class="btn btn-stop btn-sm" onclick="serverAction('stop')" id="detailBtnStop" disabled>Stop</button>
               <button class="btn btn-restart btn-sm" onclick="serverAction('restart')" id="detailBtnRestart">Restart</button>
               <button class="btn btn-reload btn-sm" onclick="serverAction('reload')" id="detailBtnReload" disabled>Reload</button>
-              <button class="btn btn-secondary btn-sm" onclick="installServerModpack()" id="detailBtnInstallModpack">Install Modpack</button>
               <button class="btn btn-secondary btn-sm" onclick="syncServerWhitelist()" id="detailBtnSyncWhitelist">Sync Whitelist</button>
             </div>
           </div>
@@ -80,15 +79,32 @@
             <form id="serverSettingsForm" onsubmit="saveServerSettings(event)"></form>
           </div>
           <div id="serverFilesView" class="server-sub-panel">
-            <div class="file-toolbar" style="margin-top:0">
-              <span id="serverFilesDir" class="dir-display" style="margin-bottom:0;flex:1;padding:6px 12px;font-size:12px"></span>
-              <div class="upload-btn">
-                <button class="btn btn-start btn-sm" onclick="downloadServerPath(serverFilePath)">Download</button>
-                <button class="btn btn-start btn-sm">Upload File</button>
-                <input type="file" id="serverFilesUpload" onchange="uploadServerFile(this)" multiple>
+            <div class="fm-toolbar">
+              <div class="fm-nav">
+                <button class="btn btn-secondary btn-sm" onclick="serverFM.navigateUp()" title="Parent directory">↑</button>
+                <div id="serverFmBreadcrumb" class="fm-breadcrumb"></div>
+              </div>
+              <div class="fm-actions">
+                <button class="btn btn-secondary btn-sm" onclick="serverFM.refresh()">Refresh</button>
+                <button class="btn btn-secondary btn-sm" onclick="serverFM.mkdirPrompt()">New Folder</button>
+                <button class="btn btn-secondary btn-sm" onclick="serverFM.downloadCurrent()">Download Dir</button>
+                <div class="upload-btn">
+                  <button class="btn btn-start btn-sm">Upload Files</button>
+                  <input type="file" id="serverFilesUpload" multiple onchange="serverFM.onFilesPicked(this)">
+                </div>
+                <div class="upload-btn">
+                  <button class="btn btn-start btn-sm">+ Add Folder</button>
+                  <input type="file" id="serverFilesDirUpload" webkitdirectory multiple onchange="serverFM.onDirPicked(this)">
+                </div>
               </div>
             </div>
-            <div id="serverFilesBrowser"></div>
+            <div id="serverFmQueue" class="fm-queue" style="display:none"></div>
+            <div id="serverFmSelbar" class="fm-selbar" style="display:none"></div>
+            <div class="fm-search">
+              <input id="serverFmSearchInput" placeholder="Filter files..." oninput="serverFM.filterChanged()">
+            </div>
+            <div id="serverFilesDir" class="dir-display"></div>
+            <div id="serverFilesBrowser" class="fm-browser"></div>
           </div>
         </div>
       </div>

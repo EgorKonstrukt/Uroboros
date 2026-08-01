@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
 
 from launcher.api.api_manager import APIManager
 from launcher.api.auth import YggdrasilSession, YggdrasilAuth
-from launcher.config import LauncherConfig, cache_projects, load_cached_projects
+from launcher.config import LauncherConfig, cache_projects, load_cached_projects, cached_projects_stale
 from launcher.ui.settings_dialog import SettingsDialog
 from launcher.ui.login_dialog import LoginDialog
 from launcher.game.starter import GameStarter
@@ -242,7 +242,7 @@ class MainWindow(QWidget):
                 return self.api.get_project(pid), False
             except Exception:
                 cached = load_cached_projects()
-                if cached:
+                if cached and not cached_projects_stale(cached):
                     return cached, True
                 raise
 
@@ -260,6 +260,9 @@ class MainWindow(QWidget):
             self.modpacks = data.get("modpacks", [])
             if not from_cache:
                 cache_projects(data)
+                self.status_label.setText("")
+            else:
+                self.status_label.setText("Offline — showing cached data")
             self._populate_ui()
 
         def on_error(err):
@@ -476,6 +479,10 @@ class MainWindow(QWidget):
                 if self._cancel_requested:
                     return "cancelled"
                 should_cancel = lambda: self._cancel_requested
+                try:
+                    m = self.api.get_modpack(self.project["id"], self.current_modpack["id"])
+                except Exception:
+                    pass
 
                 vm = VersionManager()
                 version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""), self._update_progress, should_cancel)
@@ -658,6 +665,10 @@ class MainWindow(QWidget):
                 if self._cancel_requested:
                     return None
                 should_cancel = lambda: self._cancel_requested
+                try:
+                    m = self.api.get_modpack(self.project["id"], self.current_modpack["id"])
+                except Exception:
+                    pass
 
                 vm = VersionManager()
                 version = vm.install_loader(m.get("mc_version", ""), m.get("loader", ""), m.get("loader_version", ""), self._update_progress, should_cancel)

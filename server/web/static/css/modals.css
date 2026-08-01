@@ -30,3 +30,4 @@
 .toast-info{background:#323232;color:#fff}
 .toast-success{background:var(--success);color:#fff}
 .toast-error{background:var(--error);color:#fff}
+.toast-warning{background:var(--warning);color:#fff}

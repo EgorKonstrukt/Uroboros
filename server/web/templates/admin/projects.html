@@ -48,22 +48,40 @@
               <button class="sub-nav-item" data-mp-subtab="mods" onclick="switchMpSubTab('mods')">Mods</button>
             </div>
             <div id="pdMpFilesView" class="server-sub-panel active">
-              <div class="file-toolbar">
-                <span id="pdMpDir" class="dir-display" style="margin-bottom:0;flex:1;padding:6px 12px;font-size:12px"></span>
-                <div class="upload-btn">
-                  <button class="btn btn-start btn-sm">Upload File</button>
-                  <input type="file" id="pdMpUploadInput" onchange="uploadMpFile(this)" multiple>
+              <div class="fm-toolbar">
+                <div class="fm-nav">
+                  <button class="btn btn-secondary btn-sm" onclick="mpFM.navigateUp()" title="Parent directory">↑</button>
+                  <div id="pdMpBreadcrumb" class="fm-breadcrumb"></div>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="document.getElementById('pdMpImportInput').click()" style="margin-left:8px">Import Modpack</button>
-                <input type="file" id="pdMpImportInput" accept=".zip,.mrpack" style="display:none" onchange="importMpArchive(this)">
-                <button class="btn btn-secondary btn-sm" onclick="document.getElementById('pdMpExtractInput').click()">Extract ZIP</button>
-                <input type="file" id="pdMpExtractInput" accept=".zip,.mrpack" style="display:none" onchange="extractMpArchive(this)">
-                <label style="font-size:12px;color:#888;display:flex;align-items:center;gap:4px;margin-left:4px">
-                  <input type="checkbox" id="pdMpExtractClear"> Clear first
-                </label>
+                <div class="fm-actions">
+                  <button class="btn btn-secondary btn-sm" onclick="mpFM.refresh()">Refresh</button>
+                  <button class="btn btn-secondary btn-sm" onclick="mpFM.mkdirPrompt()">New Folder</button>
+                  <button class="btn btn-secondary btn-sm" onclick="mpFM.downloadCurrent()">Download Dir</button>
+                  <div class="upload-btn">
+                    <button class="btn btn-start btn-sm">Upload Files</button>
+                    <input type="file" id="pdMpUploadInput" multiple onchange="mpFM.onFilesPicked(this)">
+                  </div>
+                  <div class="upload-btn">
+                    <button class="btn btn-start btn-sm">+ Add Folder</button>
+                    <input type="file" id="pdMpDirUploadInput" webkitdirectory multiple onchange="mpFM.onDirPicked(this)">
+                  </div>
+                  <button class="btn btn-primary btn-sm" onclick="document.getElementById('pdMpImportInput').click()" style="margin-left:8px">Import Modpack</button>
+                  <input type="file" id="pdMpImportInput" accept=".zip,.mrpack" style="display:none" onchange="importMpArchive(this)">
+                  <button class="btn btn-secondary btn-sm" onclick="document.getElementById('pdMpExtractInput').click()">Extract ZIP</button>
+                  <input type="file" id="pdMpExtractInput" accept=".zip,.mrpack" style="display:none" onchange="extractMpArchive(this)">
+                  <label style="font-size:12px;color:#888;display:flex;align-items:center;gap:4px;margin-left:4px">
+                    <input type="checkbox" id="pdMpExtractClear"> Clear first
+                  </label>
+                </div>
               </div>
+              <div id="pdMpQueue" class="fm-queue" style="display:none"></div>
+              <div id="pdMpSelbar" class="fm-selbar" style="display:none"></div>
+              <div class="fm-search">
+                <input id="pdMpSearchInput" placeholder="Filter files..." oninput="mpFM.filterChanged()">
+              </div>
+              <div id="pdMpDir" class="dir-display"></div>
               <div id="pdMpImportStatus" style="font-size:12px;color:#888;padding:4px 0;display:none"></div>
-              <div id="pdMpFileList"></div>
+              <div id="pdMpFileList" class="fm-browser"></div>
             </div>
             <div id="pdMpModsView" class="server-sub-panel">
               <div id="pdMpModsList"></div>

@@ -39,6 +39,9 @@ class APIManager:
         result = self._get(f"launcher/projects/{project_id}/modpacks/{modpack_id}/files")
         return result.get("items", [])
 
+    def get_modpack(self, project_id: str, modpack_id: str) -> dict:
+        return self._get(f"launcher/projects/{project_id}/modpacks/{modpack_id}")
+
     def get_servers(self, project_id: str) -> list:
         result = self._get(f"launcher/projects/{project_id}/servers")
         return result.get("items", [])

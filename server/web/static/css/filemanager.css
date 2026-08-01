@@ -1,0 +1,45 @@
+/* ===== Advanced file manager ===== */
+.fm-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.fm-nav{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+.fm-breadcrumb{display:flex;align-items:center;gap:2px;flex:1;min-width:0;overflow-x:auto;padding:0 10px;background:var(--surface-variant);border-radius:var(--radius);height:36px;scrollbar-width:thin}
+.fm-crumb{background:transparent;border:none;color:var(--primary);font-family:var(--mono);font-size:12px;cursor:pointer;padding:2px 6px;border-radius:3px;white-space:nowrap;flex-shrink:0}
+.fm-crumb:hover{background:var(--primary-tint)}
+.fm-crumb-sep{color:var(--text-hint);font-size:12px;flex-shrink:0}
+.fm-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+.fm-search{margin:6px 0 8px}
+.fm-search input{width:100%;box-sizing:border-box;height:34px;padding:0 12px;border:1px solid var(--outline);border-radius:var(--radius);font:400 13px var(--font);background:var(--surface);color:var(--on-surface);outline:none;transition:border-color .15s,box-shadow .15s}
+.fm-search input:focus{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-tint)}
+
+.fm-selbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;background:var(--primary-tint);border:1px solid var(--primary);border-radius:var(--radius);margin-bottom:8px}
+.fm-sel-count{font-weight:600;color:var(--primary);font-size:13px;margin-right:4px}
+.fm-sel-sep{width:1px;height:20px;background:var(--divider);margin:0 4px}
+
+.fm-queue{border:1px dashed var(--outline);border-radius:var(--radius);padding:10px;margin-bottom:8px;background:var(--surface)}
+.fm-queue-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.fm-queue-head strong{font-size:13px}
+.fm-queue-total{font-size:12px;color:var(--text-secondary);font-family:var(--mono)}
+.fm-queue-item{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 8px;border-radius:var(--radius);background:var(--surface-variant);margin-bottom:6px}
+.fm-queue-name{font-weight:600;font-size:13px;word-break:break-all}
+.fm-queue-count{font-size:12px;color:var(--text-secondary);font-family:var(--mono)}
+.fm-queue-done{font-size:12px;color:var(--success);font-weight:600}
+
+.fm-status{color:var(--text-hint);padding:20px;text-align:center;font-size:13px}
+.fm-browser{min-height:120px;position:relative}
+.fm-browser.fm-dragover::after{content:'Drop files or folders to upload';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--primary-tint);color:var(--primary);font-size:15px;font-weight:600;border:2px dashed var(--primary);border-radius:var(--radius);z-index:5;pointer-events:none}
+
+.fm-row{cursor:default}
+.fm-row-parent{cursor:pointer;font-weight:600;color:var(--primary)}
+.fm-row-parent:hover td{background:var(--primary-tint)}
+.fm-row-selected td{background:var(--primary-tint)}
+.fm-col-check{width:40px;text-align:center}
+.fm-col-check input{width:16px;height:16px;cursor:pointer;accent-color:var(--primary)}
+.fm-col-name{min-width:180px}
+.fm-col-name .fm-item-name{display:inline-flex;align-items:center;gap:6px}
+.fm-col-actions{width:1%;white-space:nowrap;text-align:right}
+.fm-toolbar table th,.fm-toolbar table td{border:none}
+#serverFilesView table th,#pdMpFilesView table th{cursor:pointer;user-select:none}
+#serverFilesView table th.fm-col-check,#pdMpFilesView table th.fm-col-check,
+#serverFilesView table th.fm-col-actions,#pdMpFilesView table th.fm-col-actions{cursor:default;text-align:center}
+#serverFilesView table th.fm-col-actions,#pdMpFilesView table th.fm-col-actions{text-align:right}
+#serverFilesView table tbody tr,#pdMpFilesView table tbody tr{animation:none}

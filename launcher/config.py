@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from typing import Optional
@@ -8,6 +9,8 @@ from launcher.utils.storage import get_launcher_dir, set_work_dir
 
 CONFIG_FILE = get_launcher_dir() / "config.json"
 PROJECTS_CACHE = get_launcher_dir() / "projects_cache.json"
+
+CACHE_MAX_AGE_SECONDS = 300
 
 
 @dataclass
@@ -96,12 +99,26 @@ class LauncherConfig:
 
 def cache_projects(data: dict):
     PROJECTS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(data)
+    payload["_cached_at"] = time.time()
     with open(PROJECTS_CACHE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
 def load_cached_projects() -> Optional[dict]:
     if PROJECTS_CACHE.exists():
-        with open(PROJECTS_CACHE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(PROJECTS_CACHE, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            if "id" in data:
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
     return None
+
+
+def cached_projects_stale(data: dict) -> bool:
+    if not data:
+        return True
+    cached_at = data.get("_cached_at") or 0
+    return (time.time() - cached_at) > CACHE_MAX_AGE_SECONDS

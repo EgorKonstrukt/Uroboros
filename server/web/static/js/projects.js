@@ -349,7 +349,7 @@ async function openPdMpDetail(mpid) {
         if (m.changelog) metaHtml += '<br><em>' + esc(m.changelog) + '</em>';
         document.getElementById('pdMpDetailMeta').innerHTML = metaHtml || 'No additional info';
         loadPdMpLinkedServers(mpid);
-        loadPdMpFiles();
+        mpFM.load('');
         loadPdMpMods();
     } catch (e) { toast('Failed: ' + e.message, 'error'); }
 }
@@ -387,124 +387,27 @@ async function loadPdMpMods() {
     } catch (e) { container.innerHTML = '<div class="error-msg">Failed: ' + esc(e.message) + '</div>'; }
 }
 
-var mpBrowsePath = '';
+/* ===================== Modpack files (advanced manager) ===================== */
 
-async function loadPdMpFiles(path) {
-    mpBrowsePath = path || '';
-    var container = document.getElementById('pdMpFileList');
-    var dirDisplay = document.getElementById('pdMpDir');
-    if (!pdProjectId || !pdMpDetailId) return;
-    container.innerHTML = '<div style="color:#888;padding:16px">Loading files...</div>';
-    try {
-        var url = '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files';
-        if (path) url += '?path=' + encodeURIComponent(path);
-        var r = await apiFetch(url);
-        if (!r) return;
-        var d = await r.json();
-        dirDisplay.textContent = '/' + (d.path || '') + '  (' + (d.items ? d.items.length : 0) + ' items)';
-        if (d.error) { container.innerHTML = '<div class="error-msg">' + esc(d.error) + '</div>'; return; }
-        var html = '<table><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody>';
-        if (d.path) {
-            var parentPath = d.path.replace(/\/?[^/]+$/, '');
-            html += '<tr class="file-dir" onclick="loadPdMpFiles(\'' + escAttr(parentPath) + '\')"><td><span class="tag tag-dir">DIR</span> ..</td><td></td><td></td><td></td></tr>';
-        }
-        for (var i = 0; i < (d.items || []).length; i++) {
-            var item = d.items[i];
-            var label = item.is_dir ? '<span class="tag tag-dir">DIR</span>' : '<span class="tag tag-file">FILE</span>';
-            var childPath = d.path ? d.path + '/' + item.name : item.name;
-            var clickHandler = item.is_dir
-                ? 'loadPdMpFiles(\'' + escAttr(childPath) + '\')'
-                : 'openMpFileEditor(\'' + escAttr(childPath) + '\')';
-            var sizeStr = item.is_dir ? '-' : formatSize(item.size);
-            var dateStr = new Date(item.modified * 1000).toLocaleString();
-            var actions = '';
-            if (!item.is_dir) {
-                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openMpFileEditor(\'' + escAttr(childPath) + '\')">Edit</button>';
-                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();downloadMpPath(\'' + escAttr(childPath) + '\')">Download</button>';
-            } else {
-                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();downloadMpPath(\'' + escAttr(childPath) + '\')">Download ZIP</button>';
-            }
-            actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();deleteMpFile(\'' + escAttr(childPath) + '\')">Delete</button>';
-            html += '<tr class="' + (item.is_dir ? 'file-dir' : 'file-file') + '" onclick="' + clickHandler + '"><td>' + label + ' ' + esc(item.name) + '</td><td>' + sizeStr + '</td><td>' + dateStr + '</td><td>' + actions + '</td></tr>';
-        }
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    } catch (e) { container.innerHTML = '<div class="error-msg">Failed: ' + esc(e.message) + '</div>'; }
-}
-
-async function openMpFileEditor(filePath) {
-    if (!pdProjectId || !pdMpDetailId) return;
-    try {
-        var r = await apiFetch('/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/read?path=' + encodeURIComponent(filePath));
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); return; }
-        if (!d.is_text) { toast('Binary files cannot be edited', 'error'); return; }
-        var container = document.getElementById('pdMpFileList');
-        container.innerHTML = '<div class="md-card" style="margin:0;padding:16px"><div class="row"><strong>Editing:</strong> <span style="font-family:monospace;color:#1976d2;flex:1">' + esc(d.path) + '</span>' +
-            '<button class="btn btn-start btn-sm" onclick="saveMpFile(\'' + escAttr(filePath) + '\')">Save</button>' +
-            '<button class="btn btn-secondary btn-sm" onclick="loadPdMpFiles(\'' + escAttr(mpBrowsePath) + '\')">Close</button></div>' +
-            '<textarea id="mpFileEditorText" style="width:100%;height:400px;font:13px/1.6 monospace;padding:12px;border:2px solid #bdbdbd;border-radius:4px;resize:vertical;margin-top:12px" spellcheck="false">' + esc(d.content) + '</textarea></div>';
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function saveMpFile(filePath) {
-    if (!pdProjectId || !pdMpDetailId) return;
-    var content = document.getElementById('mpFileEditorText').value;
-    try {
-        var r = await apiFetch('/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: filePath, content: content })
-        });
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); return; }
-        toast('File saved', 'success');
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function deleteMpFile(filePath) {
-    if (!pdProjectId || !pdMpDetailId || !confirm('Delete "' + filePath + '"?')) return;
-    try {
-        var r = await apiFetch('/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files?path=' + encodeURIComponent(filePath), {
-            method: 'DELETE'
-        });
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); return; }
-        toast('Deleted', 'info');
-        loadPdMpFiles(mpBrowsePath);
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function downloadMpPath(path) {
-    if (!pdProjectId || !pdMpDetailId) return;
-    var fallback = path ? path.split('/').pop() : pdMpDetailId + '-files';
-    await downloadBlob('/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/download?path=' + encodeURIComponent(path || ''), fallback);
-}
-
-async function uploadMpFile(input) {
-    if (!pdProjectId || !pdMpDetailId) { toast('Select a modpack first', 'error'); return; }
-    for (var fi = 0; fi < input.files.length; fi++) {
-        var file = input.files[fi];
-        var formData = new FormData();
-        formData.append('file', file);
-        if (mpBrowsePath) formData.append('path', mpBrowsePath);
-        try {
-            var r = await apiFetch('/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/upload', {
-                method: 'POST',
-                body: formData
-            });
-            if (!r) return;
-            var d = await r.json();
-            if (d.error) { toast(d.error, 'error'); }
-            else { toast('Uploaded: ' + file.name, 'success'); }
-        } catch (e) { toast('Upload failed: ' + e.message, 'error'); }
+var mpFM = new FileManager({
+    managerVar: 'mpFM',
+    listUrl: function (p) { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files?path=' + encodeURIComponent(p || ''); },
+    uploadBatchUrl: function () { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/upload-batch'; },
+    deleteUrl: function () { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files'; },
+    actionUrl: function (a) { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/' + a; },
+    downloadUrl: function (p) { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/download?path=' + encodeURIComponent(p || ''); },
+    readUrl: function (p) { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/read?path=' + encodeURIComponent(p); },
+    writeUrl: function () { return '/admin/projects/' + pdProjectId + '/modpacks/' + pdMpDetailId + '/files/write'; },
+    editorTextId: 'mpFileEditorText',
+    ids: {
+        browser: 'pdMpFileList',
+        dir: 'pdMpDir',
+        breadcrumb: 'pdMpBreadcrumb',
+        queue: 'pdMpQueue',
+        selbar: 'pdMpSelbar',
+        searchInput: 'pdMpSearchInput'
     }
-    input.value = '';
-    loadPdMpFiles(mpBrowsePath);
-}
+});
 
 async function loadPdMpLinkedServers(mpid) {
     var el = document.getElementById('pdMpLinkedServers');
@@ -591,7 +494,7 @@ async function importMpArchive(input) {
                     }
                     txt.innerHTML = html;
                     toast('Import complete: ' + dl + ' downloaded, ' + errList.length + ' errors', errList.length ? 'error' : 'success');
-                    loadPdMpFiles();
+                    mpFM.load('');
                     input.value = '';
                 } else if (ps.status === 'error') {
                     clearInterval(pollTimer);
@@ -638,7 +541,7 @@ async function extractMpArchive(input) {
         else {
             statusEl.innerHTML = '<span style="color:#2e7d32">Extracted ' + d.files + ' files.</span>';
             toast('Extracted ' + d.files + ' files', 'success');
-            loadPdMpFiles(mpBrowsePath);
+            mpFM.load(mpFM.path);
         }
     } catch (e) {
         statusEl.innerHTML = '<span style="color:#d32f2f">Error: ' + esc(e.message) + '</span>';

@@ -19,7 +19,7 @@ async function apiFetch(url, options) {
     } catch (e) { throw e; }
 }
 
-function toast(msg, type) {
+function toast(msg, type, duration) {
     var el = document.getElementById('toast');
     el.textContent = msg;
     el.className = 'toast toast-' + (type || 'info');
@@ -33,7 +33,7 @@ function toast(msg, type) {
             el.style.display = 'none';
             el.classList.remove('toast-out');
         }, 280);
-    }, 4000);
+    }, duration || 4000);
 }
 
 function openModal(id) {

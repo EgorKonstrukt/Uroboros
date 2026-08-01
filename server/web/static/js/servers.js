@@ -120,7 +120,7 @@ function switchServerSubTab(tab) {
     if (tab === 'overview') { startOverview(); }
     else { stopOverview(); }
     if (tab === 'settings') loadServerSettings();
-    if (tab === 'files') loadServerFiles('');
+    if (tab === 'files') serverFM.load('');
 }
 
 function pollServerOutput() {
@@ -146,10 +146,10 @@ function applyServerStatus(d) {
         var modpackLink = document.getElementById('serverDetailModpack');
         if (d.modpack_name && d.modpack_id && d.project_id) {
             modpackLink.style.display = 'inline';
-            modpackLink.innerHTML = 'Modpack: <a href="#" onclick="switchToProjectModpack(\'' + escAttr(d.project_id) + '\',\'' + escAttr(d.modpack_id) + '\');return false">' + esc(d.modpack_name) + '</a> | <a href="#" onclick="installServerModpack();return false" style="color:#1976d2">Install</a>';
+            modpackLink.innerHTML = 'Modpack: <a href="#" onclick="switchToProjectModpack(\'' + escAttr(d.project_id) + '\',\'' + escAttr(d.modpack_id) + '\');return false">' + esc(d.modpack_name) + '</a>';
         } else if (d.modpack_name) {
             modpackLink.style.display = 'inline';
-            modpackLink.innerHTML = 'Modpack: ' + esc(d.modpack_name) + ' | <a href="#" onclick="installServerModpack();return false" style="color:#1976d2">Install</a>';
+            modpackLink.innerHTML = 'Modpack: ' + esc(d.modpack_name);
         } else {
             modpackLink.style.display = 'none';
         }
@@ -235,23 +235,6 @@ async function serverAction(action) {
             toast('Server ' + action, 'info');
         }
     } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function installServerModpack() {
-    if (!currentServerId) return;
-    if (!confirm('Install modpack files into the server directory?')) return;
-    var btn = document.getElementById('detailBtnInstallModpack');
-    btn.disabled = true;
-    btn.textContent = 'Installing...';
-    try {
-        var r = await apiFetch('/admin/instances/' + currentServerId + '/install-modpack', { method: 'POST' });
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); }
-        else { toast('Modpack installed: ' + d.files_copied + ' / ' + (d.file_count || d.files_copied) + ' files copied', 'success'); }
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-    btn.disabled = false;
-    btn.textContent = 'Install Modpack';
 }
 
 async function syncServerWhitelist() {
@@ -424,124 +407,24 @@ async function saveServerSettings(event) {
     } catch (e) { toast('Failed: ' + e.message, 'error'); }
 }
 
-/* ===================== Server files ===================== */
+/* ===================== Server files (advanced manager) ===================== */
 
-var serverFilePath = '';
-
-async function loadServerFiles(path) {
-    if (!currentServerId) return;
-    serverFilePath = path || '';
-    var container = document.getElementById('serverFilesBrowser');
-    var dirDisplay = document.getElementById('serverFilesDir');
-    container.innerHTML = '<div style="color:#888;padding:16px">Loading files...</div>';
-    try {
-        var url = '/admin/instances/' + currentServerId + '/files?path=' + encodeURIComponent(path || '');
-        var r = await apiFetch(url);
-        if (!r) return;
-        var d = await r.json();
-        dirDisplay.textContent = d.absolute || '/';
-        if (d.error) { container.innerHTML = '<div class="error-msg">' + esc(d.error) + '</div>'; return; }
-        if (!d.items || !d.items.length) {
-            container.innerHTML = '<div style="color:#888;padding:16px;text-align:center">Empty directory</div>';
-            return;
-        }
-        var html = '<table><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody>';
-        if (d.path) {
-            var parentPath = d.path.replace(/\/?[^/]+$/, '');
-            html += '<tr class="file-dir" onclick="loadServerFiles(\'' + escAttr(parentPath) + '\')"><td><span class="tag tag-dir">DIR</span> ..</td><td></td><td></td><td></td></tr>';
-        }
-        for (var i = 0; i < d.items.length; i++) {
-            var item = d.items[i];
-            var label = item.is_dir ? '<span class="tag tag-dir">DIR</span>' : '<span class="tag tag-file">FILE</span>';
-            var childPath = d.path ? d.path + '/' + item.name : item.name;
-            var clickHandler = item.is_dir ? 'loadServerFiles(\'' + escAttr(childPath) + '\')' : 'openServerFileEditor(\'' + escAttr(childPath) + '\')';
-            var sizeStr = item.is_dir ? '-' : formatSize(item.size);
-            var dateStr = new Date(item.modified * 1000).toLocaleString();
-            var actions = '';
-            actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();downloadServerPath(\'' + escAttr(childPath) + '\')">' + (item.is_dir ? 'Download ZIP' : 'Download') + '</button>';
-            if (!item.is_dir) {
-                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openServerFileEditor(\'' + escAttr(childPath) + '\')">Edit</button>';
-                actions += '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();deleteServerFile(\'' + escAttr(childPath) + '\')">Delete</button>';
-            }
-            html += '<tr class="' + (item.is_dir ? 'file-dir' : 'file-file') + '" onclick="' + clickHandler + '"><td>' + label + ' ' + esc(item.name) + '</td><td>' + sizeStr + '</td><td>' + dateStr + '</td><td>' + actions + '</td></tr>';
-        }
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    } catch (e) { container.innerHTML = '<div class="error-msg">Failed: ' + esc(e.message) + '</div>'; }
-}
-
-async function openServerFileEditor(filePath) {
-    if (!currentServerId) return;
-    try {
-        var r = await apiFetch('/admin/instances/' + currentServerId + '/files/read?path=' + encodeURIComponent(filePath));
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); return; }
-        if (!d.is_text) { toast('Binary files cannot be edited', 'error'); return; }
-        var container = document.getElementById('serverFilesBrowser');
-        container.innerHTML = '<div class="md-card"><div class="row"><strong>Editing:</strong> <span style="font-family:monospace;color:#1976d2;flex:1">' + esc(d.path) + '</span>' +
-            '<button class="btn btn-start btn-sm" onclick="saveServerFile(\'' + escAttr(filePath) + '\')">Save</button>' +
-            '<button class="btn btn-secondary btn-sm" onclick="loadServerFiles(\'' + escAttr(serverFilePath) + '\')">Close</button></div>' +
-            '<textarea id="serverFileEditorText" style="width:100%;height:400px;font:13px/1.6 monospace;padding:12px;border:2px solid #bdbdbd;border-radius:4px;resize:vertical;margin-top:12px" spellcheck="false">' + esc(d.content) + '</textarea></div>';
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function saveServerFile(filePath) {
-    if (!currentServerId) return;
-    var content = document.getElementById('serverFileEditorText').value;
-    try {
-        var r = await apiFetch('/admin/instances/' + currentServerId + '/files/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: filePath, content: content })
-        });
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); return; }
-        toast('File saved', 'success');
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function deleteServerFile(filePath) {
-    if (!currentServerId || !confirm('Delete "' + filePath + '"?')) return;
-    try {
-        var r = await apiFetch('/admin/instances/' + currentServerId + '/files', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: filePath })
-        });
-        if (!r) return;
-        var d = await r.json();
-        if (d.error) { toast(d.error, 'error'); return; }
-        toast('File deleted', 'info');
-        loadServerFiles(serverFilePath);
-    } catch (e) { toast('Failed: ' + e.message, 'error'); }
-}
-
-async function downloadServerPath(path) {
-    if (!currentServerId) return;
-    var fallback = path ? path.split('/').pop() : currentServerId + '-files';
-    await downloadBlob('/admin/instances/' + currentServerId + '/files/download?path=' + encodeURIComponent(path || ''), fallback);
-}
-
-async function uploadServerFile(input) {
-    if (!currentServerId) { toast('No server selected', 'error'); return; }
-    for (var fi = 0; fi < input.files.length; fi++) {
-        var file = input.files[fi];
-        var formData = new FormData();
-        formData.append('file', file);
-        formData.append('path', serverFilePath);
-        try {
-            var r = await apiFetch('/admin/instances/' + currentServerId + '/files/upload', {
-                method: 'POST',
-                body: formData
-            });
-            if (!r) return;
-            var d = await r.json();
-            if (d.error) { toast(d.error, 'error'); }
-            else { toast('Uploaded: ' + file.name, 'success'); }
-        } catch (e) { toast('Upload failed: ' + e.message, 'error'); }
+var serverFM = new FileManager({
+    managerVar: 'serverFM',
+    listUrl: function (p) { return '/admin/instances/' + currentServerId + '/files?path=' + encodeURIComponent(p || ''); },
+    uploadBatchUrl: function () { return '/admin/instances/' + currentServerId + '/files/upload-batch'; },
+    deleteUrl: function () { return '/admin/instances/' + currentServerId + '/files'; },
+    actionUrl: function (a) { return '/admin/instances/' + currentServerId + '/files/' + a; },
+    downloadUrl: function (p) { return '/admin/instances/' + currentServerId + '/files/download?path=' + encodeURIComponent(p || ''); },
+    readUrl: function (p) { return '/admin/instances/' + currentServerId + '/files/read?path=' + encodeURIComponent(p); },
+    writeUrl: function () { return '/admin/instances/' + currentServerId + '/files/write'; },
+    editorTextId: 'serverFileEditorText',
+    ids: {
+        browser: 'serverFilesBrowser',
+        dir: 'serverFilesDir',
+        breadcrumb: 'serverFmBreadcrumb',
+        queue: 'serverFmQueue',
+        selbar: 'serverFmSelbar',
+        searchInput: 'serverFmSearchInput'
     }
-    input.value = '';
-    loadServerFiles(serverFilePath);
-}
+});
