@@ -56,6 +56,53 @@ class ServerManager:
             return f"Server JAR not found at {jar_path}"
         return None
 
+    def _ensure_injector(self) -> Optional[str]:
+        """Download authlib-injector.jar into the server dir if needed.
+
+        Returns an error message on failure, or None on success.
+        """
+        if not self.config.api_url:
+            return None
+        filename = (self.config.injector_filename or "authlib-injector.jar").strip() or "authlib-injector.jar"
+        server_dir = Path(self.config.server_dir) if self.config.server_dir else Path.cwd()
+        jar_path = server_dir / filename
+        if jar_path.exists():
+            return None
+        from server.mc.injector import InjectorManager
+        try:
+            mgr = InjectorManager(server_dir)
+            mgr.download(filename)
+            return None
+        except Exception as e:
+            return f"Failed to download authlib-injector: {e}"
+
+    def _ensure_online_mode(self):
+        """Force online-mode=true so the injector auth flow works."""
+        if not self.config.api_url:
+            return
+        server_dir = Path(self.config.server_dir).resolve() if self.config.server_dir else Path.cwd().resolve()
+        server_dir.mkdir(parents=True, exist_ok=True)
+        props_path = server_dir / "server.properties"
+        lines = []
+        found = False
+        if props_path.exists():
+            try:
+                lines = props_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                lines = []
+        for i, line in enumerate(lines):
+            key = line.split("=", 1)[0].strip()
+            if key == "online-mode":
+                lines[i] = "online-mode=true"
+                found = True
+                break
+        if not found:
+            lines.append("online-mode=true")
+        try:
+            props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
     def _build_command(self) -> List[str]:
         server_dir = Path(self.config.server_dir) if self.config.server_dir else Path.cwd()
         server_path = server_dir / self.config.server_filename
@@ -96,6 +143,12 @@ class ServerManager:
             self._stopping = False
             self.last_error = self._preflight_check()
             if self.last_error:
+                return False
+
+            self._ensure_online_mode()
+            injector_err = self._ensure_injector()
+            if injector_err:
+                self.last_error = injector_err
                 return False
 
             self._accept_eula()

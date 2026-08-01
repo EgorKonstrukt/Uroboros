@@ -402,3 +402,27 @@ async def launcher_download_modpack_file(project_id: str, modpack_id: str, filen
         path=str(target), filename=filename,
         media_type="application/octet-stream",
     )
+
+
+@launcher_router.get("/injector")
+async def launcher_injector():
+    """Serve the authlib-injector JAR to launcher clients.
+
+    Downloads the JAR on first request (cached in the server dir).
+    """
+    from server.mc.injector import InjectorManager
+    mgr = InjectorManager(SERVER_DIR / "injector")
+    if not mgr.is_downloaded():
+        try:
+            mgr.download()
+        except Exception as e:
+            return JSONResponse(
+                content={"error": f"Failed to download authlib-injector: {e}"},
+                status_code=500,
+            )
+    jar = mgr.save_dir / "authlib-injector.jar"
+    return FileResponse(
+        path=str(jar),
+        filename="authlib-injector.jar",
+        media_type="application/java-archive",
+    )

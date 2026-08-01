@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from server.auth.routes import router as auth_router
+from server.auth.routes import router as auth_router, yggdrasil_router
 from server.web.admin import router as admin_router, _migrate_modpacks_from_json
 from server.web import projects_router, launcher_router, news_router
 
@@ -34,6 +34,7 @@ async def global_exception(request: Request, exc: Exception):
 
 
 app.include_router(auth_router, prefix="/auth")
+app.include_router(yggdrasil_router)
 app.include_router(admin_router, prefix="/admin")
 app.include_router(projects_router, prefix="/projects")
 app.include_router(news_router, prefix="/projects")
@@ -41,5 +42,23 @@ app.include_router(launcher_router, prefix="/launcher")
 
 
 @app.get("/")
-async def root():
-    return {"status": "ok", "server": "Uroboros Server", "version": "2.0.0"}
+async def root(request: Request):
+    host = request.url.hostname or "127.0.0.1"
+    skin_domains = ["localhost", "127.0.0.1", "0.0.0.0", host]
+    seen = []
+    for d in skin_domains:
+        if d and d not in seen:
+            seen.append(d)
+    return {
+        "status": "ok",
+        "server": "Uroboros Server",
+        "version": "2.0.0",
+        "meta": {
+            "serverName": "Uroboros Server",
+            "implementationName": "Uroboros Yggdrasil",
+            "implementationVersion": "2.0.0",
+            "feature.non_email_login": True,
+            "feature.no_mojang_namespace": True,
+        },
+        "skinDomains": seen,
+    }

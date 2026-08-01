@@ -102,18 +102,21 @@ class GameStarter:
         return natives_dir
 
     def _get_jvm_args(self, java_path: str, max_mem: int, min_mem: int, extra_args: str,
-                      meta, gdir: str = "", session: YggdrasilSession = None) -> list:
+                      meta, gdir: str = "", session: YggdrasilSession = None,
+                      injector_jar: str = "", injector_url: str = "") -> list:
         args = [
             java_path,
             f"-Xmx{max_mem}M",
             f"-Xms{min_mem}M",
         ]
+        if injector_jar and injector_url and session and session.access_token and session.access_token != "0":
+            args.insert(1, f"-javaagent:{injector_jar}={injector_url}")
         placeholders = self._build_placeholders(meta, gdir, session)
         jvm_section = meta.arguments.get("jvm", []) if isinstance(meta.arguments, dict) else []
         for arg in jvm_section:
             if not isinstance(arg, str):
                 continue
-            if arg == "-cp" or arg == "--classpath" or "${classpath}" in arg:
+            if arg == "-cp" or arg == "--classpath" or arg == "${classpath}":
                 continue
             if arg.startswith("-Djava.library.path=") or arg.startswith("-Dlog4j.configurationFile="):
                 continue
@@ -223,6 +226,8 @@ class GameStarter:
         output_callback: Optional[Callable[[str], None]] = None,
         on_exit: Optional[Callable[[], None]] = None,
         game_dir: str = "",
+        injector_jar: str = "",
+        injector_url: str = "",
     ) -> bool:
         meta = self.version_manager.get_version_meta(version_id)
         if not meta.main_class:
@@ -238,7 +243,7 @@ class GameStarter:
 
         self.version_manager.download_missing_natives(meta)
         natives_dir = self.extract_natives(meta)
-        jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args, meta, gdir, session)
+        jvm_args = self._get_jvm_args(java_path, max_mem, min_mem, extra_jvm_args, meta, gdir, session, injector_jar, injector_url)
         log_cfg = get_log_config_path(version_id)
         if log_cfg.exists():
             jvm_args.append(f"-Dlog4j.configurationFile={log_cfg}")

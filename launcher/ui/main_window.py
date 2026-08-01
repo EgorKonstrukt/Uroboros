@@ -753,10 +753,18 @@ class MainWindow(QWidget):
             xmx = over.get("max_memory") or m.get("max_memory") or self.config.max_memory
             xms = over.get("min_memory") or m.get("min_memory") or self.config.min_memory
             jvm_args = over.get("java_args") or m.get("java_args") or self.config.java_args
-            return meta, xmx, xms, jvm_args
+            injector_jar = ""
+            injector_url = ""
+            if session.access_token and session.access_token != "0":
+                from launcher.game.injector import download_injector, injector_downloaded, get_injector_path
+                if not injector_downloaded():
+                    download_injector(self.config.api_url, verify_ssl=self.config.verify_ssl)
+                injector_jar = str(get_injector_path())
+                injector_url = self.config.api_url.rstrip("/")
+            return meta, xmx, xms, jvm_args, injector_jar, injector_url
 
         def on_done(result):
-            _, xmx, xms, jvm_args = result
+            _, xmx, xms, jvm_args, injector_jar, injector_url = result
             try:
                 self.starter.start(
                     version_id=version,
@@ -770,6 +778,8 @@ class MainWindow(QWidget):
                     output_callback=lambda text: self.console.append(text),
                     on_exit=self._game_signals.exited.emit,
                     game_dir=str(mp_dir),
+                    injector_jar=injector_jar,
+                    injector_url=injector_url,
                 )
                 self._game_running = True
                 self.status_label.setText("Game running")

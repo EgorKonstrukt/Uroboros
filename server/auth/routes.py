@@ -22,6 +22,7 @@ from server.web.auth import require_admin
 from fastapi import Depends
 
 router = APIRouter()
+yggdrasil_router = APIRouter()
 
 ACCESS_TOKEN_TTL = timedelta(hours=24)
 SERVER_SESSION_TTL = timedelta(seconds=30)
@@ -492,3 +493,227 @@ async def admin_stats():
             "users": user_count,
             "sessions": session_count,
         }
+
+
+# ── Yggdrasil (authlib-injector compatible) endpoints ──
+#
+# authlib-injector expects the Mojang yggdrasil protocol at these paths:
+#   POST /authserver/authenticate|refresh|validate|invalidate|signout
+#   POST /sessionserver/session/minecraft/join
+#   GET  /sessionserver/session/minecraft/hasJoined
+#   GET  /sessionserver/session/minecraft/profile/{uuid}
+#   GET  /api/user/profile/{uuid}/skin
+#   POST /api/profiles/minecraft
+#
+# These wrappers reuse the handlers above (which already follow the
+# yggdrasil JSON format) but expose them at the protocol paths.
+
+
+@yggdrasil_router.post("/authserver/authenticate")
+async def ygg_authenticate(request: Request, body: AuthRequest):
+    return await authenticate(request, body)
+
+
+@yggdrasil_router.post("/authserver/refresh")
+async def ygg_refresh(request: Request, body: RefreshRequest):
+    return await refresh(request, body)
+
+
+@yggdrasil_router.post("/authserver/validate")
+async def ygg_validate(request: Request, body: TokenRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
+    async with get_session() as session:
+        user = await _get_user_by_token(session, body.accessToken)
+        if not user:
+            return _error("Invalid token")
+        if body.clientToken and not (
+            user.client_token_hash and hash_token(body.clientToken) == user.client_token_hash
+        ):
+            return _error("Invalid clientToken")
+        return Response(status_code=204)
+
+
+@yggdrasil_router.post("/authserver/invalidate")
+async def ygg_invalidate(request: Request, body: TokenRequest):
+    async with get_session() as session:
+        user = await _get_user_by_token(session, body.accessToken)
+        if user:
+            user.access_token_hash = ""
+            user.client_token_hash = ""
+            user.token_expires_at = None
+            await session.commit()
+    return Response(status_code=204)
+
+
+@yggdrasil_router.post("/authserver/signout")
+async def ygg_signout(request: Request, body: SignoutRequest):
+    async with get_session() as session:
+        user = await _get_user_by_username(session, body.username)
+        if user and check_password(body.password, user.password_hash):
+            user.access_token_hash = ""
+            user.client_token_hash = ""
+            user.token_expires_at = None
+            await session.commit()
+    return Response(status_code=204)
+
+
+@yggdrasil_router.post("/sessionserver/session/minecraft/join")
+async def ygg_join(request: Request, body: JoinRequest):
+    limited = _check_rate(request)
+    if limited:
+        return limited
+    async with get_session() as session:
+        user = await _get_user_by_token(session, body.accessToken)
+        if not user or user.uuid != body.selectedProfile.replace("-", ""):
+            return _error("Invalid token or profile")
+
+        from server.mc.bans import get_global_ban
+        ban = await get_global_ban(user)
+        if ban is not None:
+            return _error(f"You are banned: {ban.reason or 'Banned'}")
+
+        stmt = select(ServerSessionModel).where(
+            ServerSessionModel.display_name == user.display_name
+        )
+        result = await session.execute(stmt)
+        ss = result.scalar_one_or_none()
+        if not ss:
+            ss = ServerSessionModel(
+                display_name=user.display_name,
+                server_id=body.serverId,
+                expires_at=_now() + SERVER_SESSION_TTL,
+            )
+            session.add(ss)
+        else:
+            ss.server_id = body.serverId
+            ss.expires_at = _now() + SERVER_SESSION_TTL
+        await session.commit()
+        return Response(status_code=204)
+
+
+@yggdrasil_router.get("/sessionserver/session/minecraft/hasJoined")
+async def ygg_has_joined(request: Request):
+    qs = parse_qs(urlparse(str(request.url)).query)
+    username = qs.get("username", [""])[0]
+    server_id = qs.get("serverId", [""])[0]
+
+    async with get_session() as session:
+        stmt = select(ServerSessionModel).where(
+            ServerSessionModel.display_name == username,
+            ServerSessionModel.server_id == server_id,
+            ServerSessionModel.expires_at > _now(),
+        )
+        result = await session.execute(stmt)
+        ss = result.scalar_one_or_none()
+
+        if ss:
+            stmt = select(UserModel).where(UserModel.display_name == username)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user:
+                from server.mc.bans import get_global_ban
+                ban = await get_global_ban(user)
+                if ban is not None:
+                    return Response(status_code=204)
+                return {
+                    "id": user.uuid,
+                    "name": user.display_name,
+                    "properties": _user_properties(user, _base_url(request)),
+                }
+
+        return Response(status_code=204)
+
+
+@yggdrasil_router.get("/sessionserver/session/minecraft/profile/{profile_id}")
+async def ygg_get_profile(profile_id: str, request: Request):
+    clean_id = profile_id.replace("-", "")
+    async with get_session() as session:
+        user = await _get_user_by_uuid(session, clean_id)
+        if user:
+            return {
+                "id": user.uuid,
+                "name": user.display_name,
+                "properties": _user_properties(user, _base_url(request)),
+            }
+        return Response(status_code=204)
+
+
+@yggdrasil_router.get("/api/user/profile/{profile_id}/skin")
+async def ygg_get_skin(profile_id: str):
+    return await get_skin(profile_id)
+
+
+@yggdrasil_router.put("/api/user/profile/{profile_id}/skin")
+async def ygg_put_skin(profile_id: str, request: Request, file: UploadFile = File(...), model: str = Form("")):
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+    clean_id = profile_id.replace("-", "")
+    async with get_session() as session:
+        user = await _get_user_by_token(session, token)
+        if not user:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized", "errorMessage": "Invalid token"},
+            )
+        if user.uuid != clean_id:
+            return _error("Invalid token or profile")
+        data = await file.read()
+        if len(data) > 10 * 1024 * 1024:
+            return _error("Skin file too large")
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return _error("Skin must be a PNG image")
+        skin_model = (model or "classic").strip().lower()
+        if skin_model not in ("classic", "slim"):
+            skin_model = "classic"
+        user.skin = base64.b64encode(data).decode("ascii")
+        user.skin_model = skin_model
+        await session.commit()
+        return Response(status_code=204)
+
+
+@yggdrasil_router.delete("/api/user/profile/{profile_id}/skin")
+async def ygg_delete_skin(profile_id: str, request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+    clean_id = profile_id.replace("-", "")
+    async with get_session() as session:
+        user = await _get_user_by_token(session, token)
+        if not user:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized", "errorMessage": "Invalid token"},
+            )
+        if user.uuid != clean_id:
+            return _error("Invalid token or profile")
+        user.skin = ""
+        await session.commit()
+        return Response(status_code=204)
+
+
+@yggdrasil_router.post("/api/profiles/minecraft")
+async def ygg_profiles_minecraft(body: list[str]):
+    """Mojang profile-name lookup: body is a JSON array of names."""
+    names = [n for n in (body or []) if isinstance(n, str) and n.strip()]
+    if not names:
+        return []
+    async with get_session() as session:
+        stmt = select(UserModel).where(
+            or_(
+                UserModel.display_name.in_(names),
+                UserModel.username.in_(names),
+            )
+        )
+        result = await session.execute(stmt)
+        users = result.scalars().all()
+        by_name = {}
+        for u in users:
+            by_name[u.display_name] = u
+            by_name[u.username] = u
+        out = []
+        for n in names:
+            u = by_name.get(n)
+            if u:
+                out.append({"id": u.uuid, "name": u.display_name})
+        return out

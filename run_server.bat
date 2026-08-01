@@ -28,10 +28,20 @@ if errorlevel 3 goto stop
 if errorlevel 2 goto start
 if errorlevel 1 goto run
 
-:run
+:killport
 echo.
-echo Starting server at http://127.0.0.1:25581 ...
-echo Admin dashboard: http://127.0.0.1:25581/admin/
+echo Killing existing process on port %PORT% ...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT%" ^| findstr LISTENING') do (
+    taskkill /F /PID %%a >nul 2>&1 && echo Killed PID %%a on port %PORT%
+)
+exit /b 0
+
+:run
+set PORT=25581
+call :killport
+echo.
+echo Starting server at http://127.0.0.1:%PORT% ...
+echo Admin dashboard: http://127.0.0.1:%PORT%/admin/
 echo.
 .venv\Scripts\python.exe -m server run
 pause
