@@ -27,6 +27,7 @@ class ServerManager:
         self._stopping = False
         self._starting = False
         self._output_history: list[str] = []
+        self._output_emitted = 0
         self._output_callbacks: list[Callable[[str], None]] = []
 
     def on_output(self, callback: Callable[[str], None]):
@@ -34,6 +35,7 @@ class ServerManager:
 
     def _emit_output(self, line: str):
         self._output_history.append(line)
+        self._output_emitted += 1
         if len(self._output_history) > 1000:
             self._output_history.pop(0)
         for cb in self._output_callbacks:
@@ -44,6 +46,21 @@ class ServerManager:
 
     def get_output(self, tail: int = 100) -> list[str]:
         return self._output_history[-tail:]
+
+    def get_output_cursor(self) -> int:
+        """Monotonic count of emitted output lines (never decreases)."""
+        with self._lock:
+            return self._output_emitted
+
+    def get_output_from(self, start: int) -> list[str]:
+        """Return output lines emitted at global index >= start (inclusive)."""
+        with self._lock:
+            history = self._output_history
+            first_available = self._output_emitted - len(history)
+            if start < first_available:
+                start = first_available
+            offset = max(0, start - first_available)
+            return history[offset:]
 
     def _preflight_check(self) -> Optional[str]:
         if not self.config.server_filename:

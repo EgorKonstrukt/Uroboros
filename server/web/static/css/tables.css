@@ -5,6 +5,9 @@ tbody td{padding:0 16px;height:52px;border-bottom:1px solid var(--divider);color
 tbody tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--hover-bg)}
 tbody td code{font-family:var(--mono);font-size:12px;background:var(--code-bg);padding:2px 6px;border-radius:var(--radius);word-break:break-all}
+.player-cell{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.player-head{width:24px;height:24px;border-radius:4px;background:var(--surface-variant);object-fit:cover;image-rendering:pixelated;flex-shrink:0;border:1px solid var(--divider)}
+.player-head-fallback{display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-hint)}
 .md-card > table{box-shadow:none;border-radius:0;margin:0}
 
 .md-card{background:var(--surface);border-radius:var(--radius);padding:20px 24px;box-shadow:var(--md-elevation-1);margin-bottom:16px}

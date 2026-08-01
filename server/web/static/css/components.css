@@ -41,6 +41,10 @@
 .console-search{display:flex;align-items:center;gap:4px;margin-left:auto}
 .console-search input{padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e6edf3;font:12px var(--mono);width:140px;outline:none;transition:border-color .15s}
 .console-search input:focus{border-color:#e94560}
+
+.console-toolbar select{height:28px;padding:0 6px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:#1b1b1b;color:#c9d1d9;font:600 11px var(--font);outline:none;cursor:pointer;transition:border-color .15s}
+.console-toolbar select:hover{border-color:rgba(255,255,255,.3)}
+.console-toolbar select:focus{border-color:#e94560}
 .search-count{color:#8b949e;font-size:11px;min-width:30px;text-align:center}
 
 #console, #serverConsoleOutput{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 12px;font:13px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all;background:#1b1b1b;color:#e6edf3;scroll-behavior:smooth}
@@ -57,6 +61,8 @@
 #console .line.server, #serverConsoleOutput .line.server{color:#f778ba}
 #console .line.crash, #serverConsoleOutput .line.crash{color:#f85149;font-weight:700;background:rgba(248,81,73,.1)}
 #console .timestamp, #serverConsoleOutput .timestamp{color:#484f58;margin-right:8px;font-size:11px}
+
+#serverConsoleOutput.no-wrap{white-space:pre;word-break:normal;overflow-x:auto}
 #console::-webkit-scrollbar, #serverConsoleOutput::-webkit-scrollbar{width:6px}
 #console::-webkit-scrollbar-track, #serverConsoleOutput::-webkit-scrollbar-track{background:#222}
 #console::-webkit-scrollbar-thumb, #serverConsoleOutput::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
@@ -73,3 +79,27 @@
 .console-status .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
 .console-status .dot-on{background:var(--success)}
 .console-status .dot-off{background:#484f58}
+
+/* ===== Light theme (default) overrides ===== */
+html:not(.theme-dark) #console, html:not(.theme-dark) #serverConsoleOutput{background:#fafafa;color:#24292f;border:1px solid var(--divider);border-radius:6px}
+html:not(.theme-dark) #console .line.info, html:not(.theme-dark) #serverConsoleOutput .line.info{color:#24292f}
+html:not(.theme-dark) #console .line.warn, html:not(.theme-dark) #serverConsoleOutput .line.warn{color:#b98800}
+html:not(.theme-dark) #console .line.error, html:not(.theme-dark) #serverConsoleOutput .line.error{color:#d73a49}
+html:not(.theme-dark) #console .line.fatal, html:not(.theme-dark) #serverConsoleOutput .line.fatal{color:#d73a49;font-weight:700}
+html:not(.theme-dark) #console .line.debug, html:not(.theme-dark) #serverConsoleOutput .line.debug{color:#6a737d}
+html:not(.theme-dark) #console .line.input, html:not(.theme-dark) #serverConsoleOutput .line.input{color:#1a7f37;font-style:italic}
+html:not(.theme-dark) #console .line.system, html:not(.theme-dark) #serverConsoleOutput .line.system{color:#6f42c1;font-style:italic}
+html:not(.theme-dark) #console .line.done, html:not(.theme-dark) #serverConsoleOutput .line.done{color:#1a7f37}
+html:not(.theme-dark) #console .line.highlight, html:not(.theme-dark) #serverConsoleOutput .line.highlight{background:rgba(233,69,96,.12);border-radius:2px}
+html:not(.theme-dark) #console .line.server, html:not(.theme-dark) #serverConsoleOutput .line.server{color:#b0568c}
+html:not(.theme-dark) #console .line.crash, html:not(.theme-dark) #serverConsoleOutput .line.crash{color:#d73a49;font-weight:700;background:rgba(215,58,73,.08)}
+html:not(.theme-dark) #console .timestamp, html:not(.theme-dark) #serverConsoleOutput .timestamp{color:#8b949e;margin-right:8px;font-size:11px}
+html:not(.theme-dark) #console::-webkit-scrollbar-track, html:not(.theme-dark) #serverConsoleOutput::-webkit-scrollbar-track{background:#f0f0f0}
+html:not(.theme-dark) #console::-webkit-scrollbar-thumb, html:not(.theme-dark) #serverConsoleOutput::-webkit-scrollbar-thumb{background:#c9d1d9;border-radius:3px}
+html:not(.theme-dark) #console::-webkit-scrollbar-thumb:hover, html:not(.theme-dark) #serverConsoleOutput::-webkit-scrollbar-thumb:hover{background:#a8b1ba}
+html:not(.theme-dark) .console-toolbar select{background:#ffffff;color:#24292f;border-color:var(--divider)}
+html:not(.theme-dark) .console-toolbar select:hover{border-color:#c9d1d9}
+html:not(.theme-dark) .console-bottom{background:#f0f0f0;border-top-color:var(--divider)}
+html:not(.theme-dark) .console-bottom input{background:#ffffff;color:#24292f;border-color:var(--divider)}
+html:not(.theme-dark) .console-bottom input::placeholder{color:#8b949e}
+html:not(.theme-dark) .console-status{color:#57606a}

@@ -52,19 +52,40 @@
           <div id="serverConsoleView" class="server-sub-panel active">
             <div class="console-wrap server-console-wrap">
               <div class="console-toolbar">
+                <select id="consoleRefreshRate" title="Console refresh rate" onchange="onConsoleRefreshChange()">
+                  <option value="500">0.5s</option>
+                  <option value="1000">1s</option>
+                  <option value="2000" selected>2s</option>
+                  <option value="5000">5s</option>
+                  <option value="10000">10s</option>
+                  <option value="30000">30s</option>
+                </select>
+                <span class="sep"></span>
                 <button class="btn-text" id="consolePauseBtn" onclick="toggleConsolePause()">Pause</button>
                 <button class="btn-text active" id="consoleScrollBtn" onclick="toggleConsoleScroll()">Scroll</button>
+                <button class="btn-text" id="consoleWrapBtn" onclick="toggleConsoleWrap()">Wrap</button>
                 <span class="sep"></span>
                 <button class="btn-text" onclick="consoleFontSize(-1)">A-</button>
                 <button class="btn-text" onclick="consoleFontSize(1)">A+</button>
                 <span class="sep"></span>
+                <select id="consoleFilter" title="Filter by level" onchange="applyConsoleVisibility()">
+                  <option value="all" selected>All levels</option>
+                  <option value="no-debug">Hide debug</option>
+                  <option value="warn">Warnings + errors</option>
+                  <option value="error">Errors only</option>
+                </select>
                 <button class="btn-text" onclick="clearServerConsole()">Clear</button>
                 <div class="console-search">
-                  <input id="consoleSearchInput" placeholder="Search..." oninput="searchServerConsole()">
+                  <input id="consoleSearchInput" placeholder="Search..." oninput="applyConsoleVisibility()">
                   <span class="search-count" id="consoleSearchCount"></span>
                 </div>
               </div>
               <div id="serverConsoleOutput"></div>
+              <div class="console-status">
+                <span class="console-status-item"><span class="dot dot-off" id="consoleStatusDot"></span><span id="consoleStatusText">Offline</span></span>
+                <span class="console-status-item" id="consoleStats">Lines: 0</span>
+                <span class="console-status-item" id="consoleUpdated"></span>
+              </div>
               <div class="console-bottom">
                 <input id="consoleCmdInput" placeholder="Type a command..." onkeydown="handleConsoleCmdKey(event)">
                 <button class="btn-text" onclick="sendServerCommand()">Send</button>

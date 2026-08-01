@@ -489,12 +489,32 @@ async def instance_whitelist_sync(instance_id: str):
     return result
 
 
+def _console_refresh_ms() -> int:
+    try:
+        return max(100, min(60000, int(ServerConfig.load().console_refresh_ms)))
+    except Exception:
+        return 2000
+
+
 @router.get("/instances/{instance_id}/output")
-async def instance_output(instance_id: str, tail: int = 100):
+async def instance_output(instance_id: str, start: int = 0, tail: int = 200):
     mgr = await get_manager(instance_id)
     if mgr is None:
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
-    return {"lines": mgr.get_output(tail), "running": mgr.is_running(), "id": instance_id}
+    cursor = mgr.get_output_cursor()
+    reset = start > cursor
+    if start <= 0:
+        lines = mgr.get_output(tail)
+    else:
+        lines = mgr.get_output_from(start)
+    return {
+        "lines": lines,
+        "cursor": cursor,
+        "reset": reset,
+        "running": mgr.is_running(),
+        "id": instance_id,
+        "refresh_ms": _console_refresh_ms(),
+    }
 
 
 @router.post("/instances/{instance_id}/command")
@@ -515,6 +535,7 @@ async def get_config():
     cfg = ServerConfig.load()
     data = {k: v for k, v in asdict(cfg).items() if not k.startswith("_")}
     data["admin_password"] = ""
+    data["admin_password_plain"] = ""
     return data
 
 
@@ -526,6 +547,7 @@ _GLOBAL_FIELD_META = {
     "log_level": {"label": "Log Level", "description": "Logging verbosity"},
     "curseforge_api_key": {"label": "CurseForge API Key", "description": "API key for CurseForge mod resolution (optional)"},
     "stats_refresh_seconds": {"label": "Overview Refresh Rate", "description": "How often the server overview auto-refreshes (seconds, 1-60)"},
+    "console_refresh_ms": {"label": "Console Refresh Rate (ms)", "description": "How often the admin console auto-refreshes (milliseconds, 100-60000)"},
 }
 
 
@@ -535,7 +557,7 @@ async def get_config_schema():
     raw = asdict(cfg)
     result = []
     for f in fields(ServerConfig):
-        if f.name.startswith("_"):
+        if f.name.startswith("_") or f.name == "admin_password_plain":
             continue
         meta = _GLOBAL_FIELD_META.get(f.name, {})
         hints = get_type_hints(ServerConfig)
@@ -576,9 +598,11 @@ async def update_config(body: dict):
         expected = hints.get(key)
         if key == "admin_password":
             if isinstance(value, str) and value.strip():
+                cfg.admin_password_plain = value
                 value = hash_password(value)
             else:
                 value = ""
+                cfg.admin_password_plain = ""
         elif expected is bool:
             if isinstance(value, str):
                 value = value.lower() in ("true", "1", "yes")

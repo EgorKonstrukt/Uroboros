@@ -18,11 +18,13 @@ class ServerConfig:
     port: int = 25581
     db_path: str = ""
     admin_password: str = ""
+    admin_password_plain: str = ""
     log_level: str = "info"
     curseforge_api_key: str = ""
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
     stats_refresh_seconds: int = 2
+    console_refresh_ms: int = 500
     trust_proxy_headers: bool = False
 
     def save(self):
@@ -54,7 +56,9 @@ class ServerConfig:
 
         if inst.admin_password and not inst.admin_password.startswith("scrypt$"):
             # Re-hash a password that was stored in plaintext before hashing was added
-            inst.admin_password = hash_password(inst.admin_password)
+            plain = inst.admin_password
+            inst.admin_password = hash_password(plain)
+            inst.admin_password_plain = inst.admin_password_plain or plain
             inst.save()
 
         return inst
@@ -62,5 +66,5 @@ class ServerConfig:
     def _ensure_secure_password(self):
         generated = secrets.token_urlsafe(12)
         self.admin_password = hash_password(generated)
+        self.admin_password_plain = generated
         print(f"[Uroboros] Generated admin panel password: {generated}")
-        print(f"[Uroboros] Save it now — it will not be shown again.")

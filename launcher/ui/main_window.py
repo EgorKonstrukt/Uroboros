@@ -5,7 +5,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QPushButton, QProgressBar, QMenu, QMessageBox, QApplication,
 )
-from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, QTimer, QSize, pyqtSignal
+from PyQt6.QtGui import QIcon, QPixmap
 
 from launcher.api.api_manager import APIManager
 from launcher.api.auth import YggdrasilSession, YggdrasilAuth
@@ -61,6 +62,7 @@ class MainWindow(QWidget):
         self._game_signals.exited.connect(self._on_game_exited)
         self._game_signals.progress.connect(self._apply_progress)
         self._load_project()
+        self._update_account_button()
         self._server_timer = QTimer(self)
         self._server_timer.timeout.connect(self._load_servers)
         self._server_timer.start(30000)
@@ -79,6 +81,7 @@ class MainWindow(QWidget):
         header.addStretch()
         self.account_btn = QPushButton("Login", self)
         self.account_btn.setObjectName("AccountButton")
+        self.account_btn.setIconSize(QSize(24, 24))
         self.account_btn.clicked.connect(self._on_account_clicked)
         header.addWidget(self.account_btn)
         self.refresh_btn = QPushButton("Refresh", self)
@@ -828,6 +831,41 @@ class MainWindow(QWidget):
     def _update_account_button(self):
         name = self.config.account_name or "Login"
         self.account_btn.setText(name)
+        if self.config.account_uuid:
+            self._load_account_head()
+        else:
+            self.account_btn.setIcon(QIcon())
+
+    def _load_account_head(self):
+        uid = self.config.account_uuid
+        api_url = self.config.api_url
+        verify_ssl = self.config.verify_ssl
+
+        def work():
+            try:
+                import requests
+                resp = requests.get(f"{api_url}/auth/skin/{uid}", timeout=10, verify=verify_ssl)
+                if resp.status_code == 200:
+                    return resp.content
+            except requests.RequestException:
+                pass
+            return None
+
+        def on_done(data):
+            if not data:
+                return
+            pixmap = QPixmap()
+            if pixmap.loadFromData(data):
+                scale = pixmap.width() // 64
+                if scale < 1:
+                    scale = 1
+                head = pixmap.copy(8 * scale, 8 * scale, 8 * scale, 8 * scale)
+                head = head.scaled(24, 24,
+                                   Qt.AspectRatioMode.IgnoreAspectRatio,
+                                   Qt.TransformationMode.FastTransformation)
+                self.account_btn.setIcon(QIcon(head))
+
+        run_async(work, on_done=on_done, on_error=lambda err: None)
 
     def _on_account_clicked(self):
         if not self.config.account_name:
@@ -851,6 +889,7 @@ class MainWindow(QWidget):
         from launcher.ui.skin_dialog import SkinDialog
         dialog = SkinDialog(self.config, self)
         dialog.exec()
+        self._load_account_head()
 
     def _open_login(self):
         dialog = LoginDialog(self.config, self)

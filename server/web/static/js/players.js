@@ -80,8 +80,14 @@ function renderPlayers() {
             '<button class="btn btn-stop btn-sm" onclick="openBanModal(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Ban</button>' +
             (u.bans && u.bans.length ? '<button class="btn btn-start btn-sm" onclick="unbanPlayer(' + u.id + ')">Unban</button>' : '') +
             '<button class="btn btn-stop btn-sm" onclick="deletePlayer(' + u.id + ',\'' + escAttr(u.display_name) + '\')">Del</button>';
+        var headHtml;
+        if (u.uuid && u.has_skin) {
+            headHtml = '<img class="player-head" alt="" data-name="' + escAttr(u.display_name) + '" data-src="/auth/skin/' + escAttr(u.uuid) + '">';
+        } else {
+            headHtml = '<span class="player-head player-head-fallback">' + esc((u.display_name || '?').charAt(0).toUpperCase()) + '</span>';
+        }
         tr.innerHTML = '<td>' + u.id + '</td>' +
-            '<td><strong>' + esc(u.display_name) + '</strong></td>' +
+            '<td class="player-cell">' + headHtml + '<strong>' + esc(u.display_name) + '</strong></td>' +
             '<td>' + esc(u.username) + '</td>' +
             '<td>' + esc(u.email || '') + '</td>' +
             '<td>' + ipCell + '</td>' +
@@ -90,10 +96,44 @@ function renderPlayers() {
             '<td>' + bansHtml + '</td>' +
             '<td class="players-actions">' + actions + '</td>';
         tbody.appendChild(tr);
+        var headImg = tr.querySelector('img.player-head[data-src]');
+        if (headImg) cropHead(headImg);
     }
     if (!users.length) {
         document.getElementById('playersStatus').textContent = allUsers.length ? 'No matches' : 'No players yet';
     }
+}
+
+function cropHead(img) {
+    var src = img.getAttribute('data-src');
+    if (!src) { headFallback(img); return; }
+    var probe = new Image();
+    probe.onload = function () {
+        try {
+            var c = document.createElement('canvas');
+            c.width = 32;
+            c.height = 32;
+            var ctx = c.getContext('2d');
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(probe, 8, 8, 8, 8, 0, 0, 32, 32);
+            img.src = c.toDataURL('image/png');
+            img.removeAttribute('data-src');
+            img.style.visibility = 'visible';
+        } catch (e) {
+            headFallback(img);
+        }
+    };
+    probe.onerror = function () { headFallback(img); };
+    probe.src = src;
+}
+
+function headFallback(el) {
+    el.onerror = null;
+    var s = document.createElement('span');
+    s.className = 'player-head player-head-fallback';
+    var name = el.getAttribute('data-name') || '';
+    s.textContent = (name || '?').charAt(0).toUpperCase();
+    el.parentNode.replaceChild(s, el);
 }
 
 function openIpsModal(userId, nick) {
