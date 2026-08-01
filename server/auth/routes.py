@@ -40,9 +40,21 @@ def _error(message: str, code: int = 403) -> JSONResponse:
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("X-Forwarded-For")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """Best-effort client IP.
+
+    Only trusts X-Forwarded-For when explicitly configured via
+    `trust_proxy_headers`, otherwise it is spoofable and ignored.
+    """
+    try:
+        from server.config import ServerConfig
+        cfg = ServerConfig.load()
+        trust_proxy = bool(getattr(cfg, "trust_proxy_headers", False))
+    except Exception:
+        trust_proxy = False
+    if trust_proxy:
+        fwd = request.headers.get("X-Forwarded-For")
+        if fwd:
+            return fwd.split(",")[0].strip()
     if request.client:
         return request.client.host or ""
     return ""

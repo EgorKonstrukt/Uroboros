@@ -2,9 +2,11 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -18,6 +20,30 @@ CF_API = "https://api.curseforge.com/v1"
 
 def _modpack_dir(project_id: str, modpack_id: str) -> Path:
     return PROJECTS_STORAGE / project_id / "modpacks" / modpack_id
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path):
+    """Extract a zip archive while rejecting path traversal / absolute entries."""
+    for member in zf.infolist():
+        name = member.filename
+        if name.startswith(("/", "\\")) or re.match(r"^[a-zA-Z]:", name):
+            raise ValueError("Invalid archive entry (absolute path)")
+        parts = [p for p in re.split(r"[\\/]", name) if p not in ("", ".")]
+        if any(p == ".." for p in parts):
+            raise ValueError("Invalid archive entry (path traversal)")
+    zf.extractall(str(dest))
+
+
+def _safe_filename(name: str, fallback: str) -> str:
+    """Return just the basename of a filename, falling back to `fallback` if empty."""
+    base = Path(name.replace("\\", "/")).name
+    return base if base else fallback
+
+
+def _require_https(url: str):
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"Unsupported download URL scheme: {parsed.scheme}")
 
 
 # ── Format detection ──
@@ -111,6 +137,7 @@ async def resolve_mr_version(mod_id: str, mc_version: str, loader: str) -> dict 
 async def download_mr_file(download_url: str, dest: Path) -> bool:
     """Download a single file from Modrinth."""
     try:
+        _require_https(download_url)
         async with aiohttp.ClientSession() as session:
             async with session.get(download_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
                 if resp.status != 200:
@@ -133,7 +160,7 @@ async def download_modrinth_mod(mod_id: str, mc_version: str, loader: str, dest_
         return False
     for file_info in version.get("files", []):
         url = file_info.get("url", "")
-        filename = file_info.get("filename", f"{mod_id}.jar")
+        filename = _safe_filename(file_info.get("filename", ""), f"{mod_id}.jar")
         if url:
             ok = await download_mr_file(url, dest_dir / filename)
             if ok:
@@ -165,6 +192,7 @@ async def resolve_cf_file(project_id: int, file_id: int, api_key: str) -> tuple[
 
 async def download_cf_file(download_url: str, dest: Path) -> tuple[bool, str]:
     try:
+        _require_https(download_url)
         async with aiohttp.ClientSession(headers={"User-Agent": "Uroboros/1.0"}) as session:
             async with session.get(download_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
                 if resp.status != 200:
@@ -189,7 +217,7 @@ async def download_curseforge_mod(project_id: int, file_id: int, api_key: str, d
     if not info:
         return False, "no data returned"
     download_url = info.get("downloadUrl", "")
-    filename = info.get("fileName", f"cf-{project_id}-{file_id}.jar")
+    filename = _safe_filename(info.get("fileName", ""), f"cf-{project_id}-{file_id}.jar")
     if not download_url:
         return False, "no downloadUrl in response"
     ok, dl_err = await download_cf_file(download_url, dest_dir / filename)
@@ -226,7 +254,7 @@ async def import_modpack_archive(
             shutil.rmtree(tmp_dir)
         tmp_dir.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive_path, "r") as zf:
-            zf.extractall(str(tmp_dir))
+            _safe_extract_zip(zf, tmp_dir)
 
         # 2. Detect format
         fmt = detect_format(tmp_dir)
@@ -301,7 +329,7 @@ async def import_modpack_archive(
                                 vdata = await resp.json()
                                 for finfo in vdata.get("files", []):
                                     furl = finfo.get("url", "")
-                                    fname = finfo.get("filename", f"{mid}.jar")
+                                    fname = _safe_filename(finfo.get("filename", ""), f"{mid}.jar")
                                     if furl:
                                         ok = await download_mr_file(furl, mp_dir / fname)
                                         if ok:

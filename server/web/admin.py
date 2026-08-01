@@ -7,7 +7,6 @@ import typing
 import json
 import shutil
 import hashlib
-import hmac
 import asyncio
 import uuid
 from dataclasses import fields, asdict
@@ -23,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from server.config import ServerConfig, SERVER_DIR
 from server.web.auth import require_admin, create_token, delete_token
 from server.auth.ratelimit import login_limiter
-from server.auth.crypto import hash_password
+from server.auth.crypto import hash_password, check_password
 from server.models import InstanceModel, ModpackModel, UserModel, UserBanModel, ServerSessionModel
 from server.database import get_session
 from sqlalchemy import select, update, delete
@@ -514,7 +513,9 @@ async def instance_command(instance_id: str, command: str):
 @router.get("/config")
 async def get_config():
     cfg = ServerConfig.load()
-    return {k: v for k, v in asdict(cfg).items() if not k.startswith("_")}
+    data = {k: v for k, v in asdict(cfg).items() if not k.startswith("_")}
+    data["admin_password"] = ""
+    return data
 
 
 _GLOBAL_FIELD_META = {
@@ -573,7 +574,12 @@ async def update_config(body: dict):
             errors.append(f"Unknown field: {key}")
             continue
         expected = hints.get(key)
-        if expected is bool:
+        if key == "admin_password":
+            if isinstance(value, str) and value.strip():
+                value = hash_password(value)
+            else:
+                value = ""
+        elif expected is bool:
             if isinstance(value, str):
                 value = value.lower() in ("true", "1", "yes")
             elif not isinstance(value, bool):
@@ -586,7 +592,7 @@ async def update_config(body: dict):
                 errors.append(f"{key}: expected integer")
                 continue
         setattr(cfg, key, value)
-        updated[key] = value
+        updated[key] = "" if key == "admin_password" else value
     if errors:
         return JSONResponse(content={"status": "partial", "updated": updated, "errors": errors}, status_code=400)
     cfg.save()
@@ -617,7 +623,7 @@ async def list_files(instance_id: str, path: str = ""):
     target = base
     if path:
         target = (base / path).resolve()
-        if not str(target).startswith(str(base.resolve())):
+        if not _is_within(base, target):
             return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     if not target.exists() or not target.is_dir():
         return JSONResponse(content={"error": "Directory not found"}, status_code=404)
@@ -640,9 +646,17 @@ async def _resolve_file_path(instance_id: str, file_path: str) -> Path | None:
         return None
     base = Path(inst.server_dir).resolve()
     target = (base / file_path).resolve()
-    if not str(target).startswith(str(base)):
+    if not _is_within(base, target):
         return None
     return target
+
+
+def _is_within(base: Path, target: Path) -> bool:
+    try:
+        target.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 @router.get("/instances/{instance_id}/files/read")
@@ -694,13 +708,13 @@ async def upload_file(instance_id: str, file: UploadFile = File(...), path: str 
     target = base
     if path:
         target = (base / path).resolve()
-        if not str(target).startswith(str(base)):
+        if not _is_within(base, target):
             return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     if not target.exists() or not target.is_dir():
         return JSONResponse(content={"error": "Directory not found"}, status_code=404)
     rel = (relpath or file.filename or "").replace("\\", "/")
     file_path = (target / rel).resolve()
-    if not str(file_path).startswith(str(base)):
+    if not _is_within(base, file_path):
         return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     try:
         content = await file.read()
@@ -719,7 +733,7 @@ async def download_file(instance_id: str, path: str = ""):
         return JSONResponse(content={"error": "Instance not found"}, status_code=404)
     base = Path(inst.server_dir).resolve()
     target = (base / path).resolve()
-    if not str(target).startswith(str(base)):
+    if not _is_within(base, target):
         return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     if not target.exists():
         return JSONResponse(content={"error": "File or directory not found"}, status_code=404)
@@ -790,6 +804,18 @@ def _make_writable(path: Path):
         os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
     except OSError:
         pass
+
+
+def _safe_extract_zip(zf, dest: Path):
+    """Extract a zip archive while rejecting path traversal / absolute entries."""
+    for member in zf.infolist():
+        name = member.filename
+        if name.startswith(("/", "\\")) or re.match(r"^[a-zA-Z]:", name):
+            raise ValueError("Invalid archive entry (absolute path)")
+        parts = [p for p in re.split(r"[\\/]", name) if p not in ("", ".")]
+        if any(p == ".." for p in parts):
+            raise ValueError("Invalid archive entry (path traversal)")
+    zf.extractall(str(dest))
 
 
 def _clear_readonly(path: Path):
@@ -967,7 +993,7 @@ async def upload_instance_files_batch(instance_id: str, request: Request, path: 
     target_dir = base
     if path:
         target_dir = (base / path).resolve()
-        if not str(target_dir).startswith(str(base)):
+        if not _is_within(base, target_dir):
             return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     target_dir.mkdir(parents=True, exist_ok=True)
     form = await request.form()
@@ -978,7 +1004,7 @@ async def upload_instance_files_batch(instance_id: str, request: Request, path: 
     for i, f in enumerate(files):
         rel = (relpaths[i] if i < len(relpaths) and relpaths[i] else (f.filename or "")).replace("\\", "/").lstrip("/")
         file_path = (target_dir / rel).resolve()
-        if not str(file_path).startswith(str(base)):
+        if not _is_within(base, file_path):
             errors.append({"relpath": rel, "error": "path traversal denied"})
             continue
         try:
@@ -1117,6 +1143,8 @@ async def list_modpacks(project_id: str):
 async def create_modpack(project_id: str, body: dict):
     import uuid
     mpid = body.get("id", "").strip() or uuid.uuid4().hex[:8]
+    if not re.match(r"^[a-zA-Z0-9_-]+$", mpid):
+        return JSONResponse(content={"error": "Invalid modpack ID (alphanumeric, hyphens, underscores only)"}, status_code=400)
     async with get_session() as session:
         existing = await session.get(ModpackModel, (mpid, project_id))
         if existing:
@@ -1213,7 +1241,7 @@ async def _resolve_mp_path(project_id: str, modpack_id: str, file_path: str) -> 
         return None
     base = mp_dir.resolve()
     target = (base / file_path).resolve()
-    if not str(target).startswith(str(base)):
+    if not _is_within(base, target):
         return None
     return target
 
@@ -1351,7 +1379,7 @@ async def extract_modpack_archive(
             archive_path = tmp_path / file.filename
             archive_path.write_bytes(content)
             with zipfile.ZipFile(archive_path, "r") as zf:
-                zf.extractall(str(tmp_path / "extracted"))
+                _safe_extract_zip(zf, tmp_path / "extracted")
             extracted = tmp_path / "extracted"
             if not extracted.exists():
                 return JSONResponse(content={"error": "Empty archive"}, status_code=400)
@@ -1397,7 +1425,7 @@ async def upload_modpack_file(
         target_dir = resolved
     rel = (relpath or file.filename or "").replace("\\", "/")
     file_path = (target_dir / rel).resolve()
-    if not str(file_path).startswith(str(base)):
+    if not _is_within(base, file_path):
         return JSONResponse(content={"error": "Path traversal denied"}, status_code=403)
     try:
         content = await file.read()
@@ -1588,7 +1616,7 @@ async def upload_modpack_files_batch(project_id: str, modpack_id: str, request: 
     for i, f in enumerate(files):
         rel = (relpaths[i] if i < len(relpaths) and relpaths[i] else (f.filename or "")).replace("\\", "/").lstrip("/")
         file_path = (target_dir / rel).resolve()
-        if not str(file_path).startswith(str(base)):
+        if not _is_within(base, file_path):
             errors.append({"relpath": rel, "error": "path traversal denied"})
             continue
         try:
@@ -1634,7 +1662,7 @@ async def import_modpack(
     with _import_tasks_lock:
         _import_tasks[task_id] = {"status": "starting", "current": 0, "total": 0, "message": "Starting...", "error": ""}
 
-    archive_path = mp_dir / f"__import_{file.filename}"
+    archive_path = mp_dir / f"__import_{uuid.uuid4().hex}.zip"
     try:
         content = await file.read()
         archive_path.write_bytes(content)
@@ -1746,7 +1774,7 @@ async def login(request: Request, body: dict):
     if not login_limiter.allow(ip):
         return JSONResponse(content={"error": "Too many attempts, try again later"}, status_code=429)
     password = body.get("password", "")
-    if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
+    if not check_password(password, cfg.admin_password or ""):
         return JSONResponse(content={"error": "Invalid password"}, status_code=401)
     token = create_token()
     return {"token": token}

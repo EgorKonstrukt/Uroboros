@@ -1,10 +1,11 @@
 import json
 import asyncio
+import re
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy import select
 
@@ -12,6 +13,7 @@ from server.config import SERVER_DIR
 from server.database import get_session, init_db
 from server.models import ProjectModel, ProjectNewsModel, ModpackModel, InstanceModel
 from server.mc.status import probe
+from server.web.auth import require_admin
 
 
 projects_router = APIRouter()
@@ -19,6 +21,16 @@ news_router = APIRouter()
 launcher_router = APIRouter()
 
 PROJECTS_STORAGE = SERVER_DIR / "projects"
+
+_VALID_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _is_within(base: Path, target: Path) -> bool:
+    try:
+        target.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def _modpack_dir(project_id: str, modpack_id: str) -> Path:
@@ -112,11 +124,13 @@ async def get_project(project_id: str):
         return d
 
 
-@projects_router.post("")
+@projects_router.post("", dependencies=[Depends(require_admin)])
 async def create_project(body: dict):
     pid = body.get("id", "").strip()
     if not pid:
         return JSONResponse(content={"error": "Project ID required"}, status_code=400)
+    if not _VALID_ID.match(pid):
+        return JSONResponse(content={"error": "Invalid Project ID (alphanumeric, hyphens, underscores only)"}, status_code=400)
     async with get_session() as session:
         existing = await session.get(ProjectModel, pid)
         if existing:
@@ -138,8 +152,10 @@ async def create_project(body: dict):
         return await _project_to_dict(project)
 
 
-@projects_router.delete("/{project_id}")
+@projects_router.delete("/{project_id}", dependencies=[Depends(require_admin)])
 async def delete_project(project_id: str):
+    if not _VALID_ID.match(project_id):
+        return JSONResponse(content={"error": "Invalid Project ID"}, status_code=400)
     async with get_session() as session:
         project = await session.get(ProjectModel, project_id)
         if not project:
@@ -152,8 +168,10 @@ async def delete_project(project_id: str):
         return {"status": "deleted"}
 
 
-@projects_router.patch("/{project_id}")
+@projects_router.patch("/{project_id}", dependencies=[Depends(require_admin)])
 async def update_project(project_id: str, body: dict):
+    if not _VALID_ID.match(project_id):
+        return JSONResponse(content={"error": "Invalid Project ID"}, status_code=400)
     async with get_session() as session:
         project = await session.get(ProjectModel, project_id)
         if not project:
@@ -183,7 +201,7 @@ async def list_news(project_id: str):
         return [await _news_to_dict(n) for n in news]
 
 
-@news_router.post("/{project_id}/news")
+@news_router.post("/{project_id}/news", dependencies=[Depends(require_admin)])
 async def create_news(project_id: str, body: dict):
     async with get_session() as session:
         project = await session.get(ProjectModel, project_id)
@@ -200,7 +218,7 @@ async def create_news(project_id: str, body: dict):
         return await _news_to_dict(entry)
 
 
-@news_router.delete("/{project_id}/news/{news_id}")
+@news_router.delete("/{project_id}/news/{news_id}", dependencies=[Depends(require_admin)])
 async def delete_news(project_id: str, news_id: int):
     async with get_session() as session:
         entry = await session.get(ProjectNewsModel, news_id)
@@ -360,6 +378,8 @@ async def launcher_sync_project(project_id: str):
 
 @launcher_router.get("/projects/{project_id}/modpacks/{modpack_id}")
 async def launcher_get_modpack(project_id: str, modpack_id: str):
+    if not (_VALID_ID.match(project_id) and _VALID_ID.match(modpack_id)):
+        return JSONResponse(content={"error": "Invalid project or modpack id"}, status_code=403)
     async with get_session() as session:
         m = await session.get(ModpackModel, (modpack_id, project_id))
         if not m:
@@ -369,6 +389,8 @@ async def launcher_get_modpack(project_id: str, modpack_id: str):
 
 @launcher_router.get("/projects/{project_id}/modpacks/{modpack_id}/files")
 async def launcher_list_modpack_files(project_id: str, modpack_id: str):
+    if not (_VALID_ID.match(project_id) and _VALID_ID.match(modpack_id)):
+        return JSONResponse(content={"error": "Invalid project or modpack id"}, status_code=403)
     mp_dir = _modpack_dir(project_id, modpack_id)
     if not mp_dir.exists():
         return JSONResponse(content={"error": "Modpack not found"}, status_code=404)
@@ -392,9 +414,11 @@ async def launcher_list_modpack_files(project_id: str, modpack_id: str):
 
 @launcher_router.get("/projects/{project_id}/modpacks/{modpack_id}/download/{filename:path}")
 async def launcher_download_modpack_file(project_id: str, modpack_id: str, filename: str):
+    if not (_VALID_ID.match(project_id) and _VALID_ID.match(modpack_id)):
+        return JSONResponse(content={"error": "Invalid project or modpack id"}, status_code=403)
     mp_dir = _modpack_dir(project_id, modpack_id)
     target = (mp_dir / filename).resolve()
-    if not str(target).startswith(str(mp_dir.resolve())):
+    if not _is_within(mp_dir, target):
         return JSONResponse(content={"error": "Access denied"}, status_code=403)
     if not target.exists() or not target.is_file():
         return JSONResponse(content={"error": "File not found"}, status_code=404)

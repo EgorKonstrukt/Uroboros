@@ -1,6 +1,7 @@
 import json
 import hashlib
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -25,6 +26,9 @@ class InjectorManager:
 
         if not download_url:
             raise ValueError("No download URL in metadata")
+
+        if urlparse(download_url).scheme != "https":
+            raise ValueError("Unsupported download URL scheme (must be https)")
 
         jar_path = self.save_dir / filename
 

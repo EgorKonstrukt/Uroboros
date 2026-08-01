@@ -20,17 +20,9 @@ def hash_password(password: str) -> str:
     return f"{_PREFIX}${salt.hex()}${digest.hex()}"
 
 
-def _is_legacy_sha256(password_hash: str) -> bool:
-    if not password_hash:
-        return False
-    return "$" not in password_hash or not password_hash.startswith(_PREFIX)
-
-
 def check_password(password: str, password_hash: str) -> bool:
-    if not password_hash:
+    if not password_hash or not password_hash.startswith(_PREFIX):
         return False
-    if _is_legacy_sha256(password_hash):
-        return _check_legacy(password, password_hash)
     try:
         _, salt_hex, digest_hex = password_hash.split("$", 2)
         salt = bytes.fromhex(salt_hex)
@@ -46,15 +38,6 @@ def check_password(password: str, password_hash: str) -> bool:
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(actual, expected)
-
-
-def _check_legacy(password: str, password_hash: str) -> bool:
-    if "$" in password_hash:
-        salt, hsh = password_hash.split("$", 1)
-        expected = hashlib.sha256((salt + password).encode()).hexdigest()
-    else:
-        expected = hashlib.sha256(password.encode()).hexdigest()
-    return hmac.compare_digest(hsh, expected)
 
 
 def hash_token(token: str) -> str:
