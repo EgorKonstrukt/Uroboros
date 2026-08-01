@@ -14,7 +14,7 @@ class ConsoleWindow(QWidget):
         self._restore_geometry()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        self.console = ConsoleWidget(self)
+        self.console = ConsoleWidget(self.config, self)
         layout.addWidget(self.console)
 
     def _restore_geometry(self):

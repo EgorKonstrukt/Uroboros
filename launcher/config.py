@@ -72,6 +72,10 @@ class LauncherConfig:
     console_height: int = 420
     console_x: int = -1
     console_y: int = -1
+    console_font_size: int = 12
+    console_word_wrap: bool = False
+    console_timestamps: bool = False
+    console_follow: bool = True
     keep_launcher_open: bool = True
     console_mode: str = "always"
     theme_mode: str = "system"

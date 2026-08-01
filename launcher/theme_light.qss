@@ -583,6 +583,106 @@ QPushButton#ConsoleClearButton:pressed {
     background: rgba(0, 0, 0, 0.12);
 }
 
+QToolButton#ConsoleToolButton {
+    background: transparent;
+    color: rgba(0, 0, 0, 0.74);
+    border: 1px solid rgba(0, 0, 0, 0.38);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+QToolButton#ConsoleToolButton:hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+QToolButton#ConsoleToolButton:pressed {
+    background: rgba(0, 0, 0, 0.12);
+}
+
+QToolButton#ConsoleToolButton:checked {
+    background: rgba(108, 99, 255, 0.18);
+    color: #1C1B1F;
+    border: 1px solid rgba(108, 99, 255, 0.6);
+}
+
+QToolButton#ConsoleNavButton {
+    background: transparent;
+    color: rgba(0, 0, 0, 0.74);
+    border: 1px solid rgba(0, 0, 0, 0.38);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QToolButton#ConsoleNavButton:hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+QToolButton#ConsoleNavButton:pressed {
+    background: rgba(0, 0, 0, 0.12);
+}
+
+QLineEdit#ConsoleSearch {
+    background: #FFFFFF;
+    color: #1C1B1F;
+    border: 1px solid #E4E0E8;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QLineEdit#ConsoleSearch:focus {
+    border: 1px solid #6C63FF;
+}
+
+QComboBox#ConsoleLevelFilter {
+    background: #FFFFFF;
+    color: #1C1B1F;
+    border: 1px solid #E4E0E8;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    min-width: 140px;
+}
+
+QComboBox#ConsoleLevelFilter:hover {
+    border: 1px solid #6C63FF;
+}
+
+QComboBox#ConsoleLevelFilter::drop-down {
+    border: none;
+    width: 22px;
+}
+
+QComboBox#ConsoleLevelFilter::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid rgba(0, 0, 0, 0.6);
+    margin-right: 6px;
+}
+
+QComboBox#ConsoleLevelFilter QAbstractItemView {
+    background: #FFFFFF;
+    color: #1C1B1F;
+    border: 1px solid #E4E0E8;
+    selection-background-color: rgba(108, 99, 255, 0.18);
+    selection-color: #1C1B1F;
+}
+
+QCheckBox#ConsoleRegex {
+    color: rgba(0, 0, 0, 0.74);
+    font-size: 12px;
+    spacing: 5px;
+}
+
+QLabel#ConsoleStatus {
+    color: rgba(0, 0, 0, 0.48);
+    font-size: 11px;
+}
+
 QLabel#DialogTitle {
     font-size: 20px;
     font-weight: 500;
